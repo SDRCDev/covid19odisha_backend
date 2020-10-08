@@ -1,0 +1,226 @@
+package com.sdrc.covid19odisha.services;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.collections.TrackerData;
+import com.sdrc.covid19odisha.repositories.SubmissionRepository;
+import com.sdrc.covid19odisha.repositories.TrackerDataRepository;
+
+@Service
+public class HomeServiceImpl implements HomeService {
+	
+	@Autowired 
+	private SubmissionRepository submissionRepository;
+	
+	@Autowired
+	private TrackerDataRepository trackerDataRepository;
+
+	@Override
+	public ResponseEntity<Map<String, Integer>> getIndicatorValue() {
+		List<SubmissionData> listOfSubmissionData = submissionRepository.findByIsVerifiedTrue();
+		Map<String, Integer> mapOfIndecatorValue = new LinkedHashMap<String, Integer>();
+		int volunteersregistered = 0;
+		int institutionsregistered = 0;
+		Set<Integer> districtsSet = new HashSet<Integer>();
+		Set<Integer> blocksSet = new HashSet<Integer>();
+		for (SubmissionData submissionData : listOfSubmissionData) {
+			if (submissionData.getData().get("fullName") != null) {
+				volunteersregistered += 1;
+
+				if ((Integer) submissionData.getData().get("areaLevel") == 1) {
+					List<Integer> districtList = (List<Integer>) submissionData.getData().get("preferredDistrict");
+					for (Integer integer : districtList) {
+						districtsSet.add(integer);
+					}
+				} else if ((Integer) submissionData.getData().get("areaLevel") == 2) {
+					Integer disrict = (Integer) submissionData.getData().get("preferredDistrict");
+					districtsSet.add(disrict);
+					List<Integer> blocklList = (List<Integer>) submissionData.getData().get("preferredBlock");
+					for (Integer integer : blocklList) {
+						blocksSet.add(integer);
+					}
+				} else if ((Integer) submissionData.getData().get("areaLevel") == 3) {
+					Integer disrict = (Integer) submissionData.getData().get("preferredDistrict");
+					districtsSet.add(disrict);
+					Integer block = (Integer) submissionData.getData().get("preferredBlock");
+					blocksSet.add(block);
+				}
+
+			} else if (submissionData.getData().get("organizationName") != null) {
+				institutionsregistered += 1;
+				
+				if ((Integer) submissionData.getData().get("areaOfService") == 106) {
+					List<Integer> districtList = (List<Integer>) submissionData.getData().get("preferredDistrict");
+					for (Integer integer : districtList) {
+						districtsSet.add(integer);
+					}
+				} else if ((Integer) submissionData.getData().get("areaOfService") == 107) {
+					Integer disrict = (Integer) submissionData.getData().get("preferredDistrict");
+					districtsSet.add(disrict);
+					List<Integer> blocklList = (List<Integer>) submissionData.getData().get("preferredBlock");
+					for (Integer integer : blocklList) {
+						blocksSet.add(integer);
+					}
+				} 
+			}
+
+		}
+		mapOfIndecatorValue.put("Volunteers Registered", volunteersregistered);
+		mapOfIndecatorValue.put("InstitutionsRegistered", institutionsregistered);
+		mapOfIndecatorValue.put("Districts", districtsSet.size());
+		mapOfIndecatorValue.put("Blocks", blocksSet.size());
+		return new ResponseEntity<Map<String, Integer>>(mapOfIndecatorValue, HttpStatus.OK);
+	}
+
+	@Override
+	public ResponseEntity<String> saveTabularData(List<Map<String, Object>> data,String date) {
+		
+		TrackerData fetchedTrackerData = null;
+		if(date==null) {
+		fetchedTrackerData = trackerDataRepository.findTop1ByOrderByIdDesc();
+		}
+		else {
+			fetchedTrackerData=trackerDataRepository.findByDbDate(date);	
+		}
+		fetchedTrackerData.setUpdatedDate(new Date());
+		fetchedTrackerData.setCreatedDate(new Date());
+		fetchedTrackerData.setUpdatedDate(new Date());
+		List<Map<String, Object>> fetchedData = fetchedTrackerData.getData();
+        int confirmedCasesDiff = 0;
+        int recoveredCasesDiff = 0;
+        int deceasedCasesDiff = 0;
+        
+        int totalConfirmedCases = 0;
+        int totalRecoveredCases = 0;
+        int totalDeceasedCases = 0;
+        int totalActiveCases = 0;
+        
+        
+        
+        
+		for (Map<String, Object> fetchedDataMap : fetchedData) {
+			for (Map<String, Object> newData : data) {
+				if (fetchedDataMap.get("areaName").equals(newData.get("areaName"))
+						&& fetchedDataMap.get("sbmAreaId").equals(newData.get("sbmAreaId"))) {
+					fetchedDataMap.put("confirmedCasesDiff", newData.get("confirmedCasesDiff"));
+					fetchedDataMap.put("recoveredCasesDiff", newData.get("recoveredCasesDiff"));
+					fetchedDataMap.put("deceasedCasesDiff", newData.get("deceasedCasesDiff"));
+					fetchedDataMap.put("activeCasesDiff", newData.get("activeCasesDiff"));
+					
+					fetchedDataMap.put("confirmedCases", fetchedDataMap.get("confirmedCases"));
+					fetchedDataMap.put("recoveredCases", fetchedDataMap.get("recoveredCases"));
+					fetchedDataMap.put("deceasedCases", fetchedDataMap.get("deceasedCases"));
+					fetchedDataMap.put("activeCases", fetchedDataMap.get("activeCases"));
+					
+					fetchedDataMap.put("totalConfirmedCases",
+							(int) fetchedDataMap.get("confirmedCases") + (int) newData.get("confirmedCasesDiff"));
+					fetchedDataMap.put("totalRecoveredCases",
+							(int) fetchedDataMap.get("recoveredCases") + (int) newData.get("recoveredCasesDiff"));
+					fetchedDataMap.put("totalDeceasedCases",
+							(int) fetchedDataMap.get("deceasedCases") + (int) newData.get("deceasedCasesDiff"));
+					
+					int activeCases = (int) fetchedDataMap.get("totalConfirmedCases")
+							- (int) fetchedDataMap.get("totalRecoveredCases") - (int) fetchedDataMap.get("totalDeceasedCases");
+					fetchedDataMap.put("totalActiveCases", activeCases);
+				}
+			}
+			
+			if(!fetchedDataMap.get("areaCode").equals("IND") && !fetchedDataMap.get("areaCode").equals("IND021")) {
+				confirmedCasesDiff+=(int)fetchedDataMap.get("confirmedCasesDiff");
+				recoveredCasesDiff +=(int)fetchedDataMap.get("recoveredCasesDiff");
+		        deceasedCasesDiff +=(int)fetchedDataMap.get("deceasedCasesDiff");
+		        
+		       totalConfirmedCases +=(int)fetchedDataMap.get("totalConfirmedCases");
+		       totalRecoveredCases +=(int)fetchedDataMap.get("totalRecoveredCases");
+		       totalDeceasedCases +=(int)fetchedDataMap.get("totalDeceasedCases");
+		       totalActiveCases +=(int)fetchedDataMap.get("totalActiveCases");
+			}
+			
+			
+			fetchedTrackerData.setData(fetchedData);
+			trackerDataRepository.save(fetchedTrackerData);
+			
+		}
+		
+		
+		
+		for (Map<String, Object> fetchedDataMap : fetchedData) {
+			if(fetchedDataMap.get("areaCode").toString().equals("IND021")) {
+				fetchedDataMap.put("confirmedCasesDiff", confirmedCasesDiff);
+				fetchedDataMap.put("recoveredCasesDiff", recoveredCasesDiff);
+				fetchedDataMap.put("deceasedCasesDiff", deceasedCasesDiff);
+				
+				
+				fetchedDataMap.put("totalConfirmedCases",totalConfirmedCases);
+				fetchedDataMap.put("totalRecoveredCases",totalRecoveredCases);
+				fetchedDataMap.put("totalDeceasedCases",totalDeceasedCases);
+				
+				int activeCases = (int) fetchedDataMap.get("totalConfirmedCases")
+						- (int) fetchedDataMap.get("totalRecoveredCases") - (int) fetchedDataMap.get("totalDeceasedCases");
+				fetchedDataMap.put("totalActiveCases", activeCases);
+				
+				fetchedTrackerData.setData(fetchedData);
+				trackerDataRepository.save(fetchedTrackerData);
+			}
+		}
+		return new ResponseEntity<String>("Saved", HttpStatus.OK);
+	}
+
+	
+	@Override
+	@Scheduled(cron = "0 2 0 1/1 * ?")
+	public void cornJob() {
+
+		TrackerData fetchedTrackerData = trackerDataRepository.findTop1ByOrderByIdDesc();
+		List<Map<String, Object>> fetchedData = fetchedTrackerData.getData();
+		List<Map<String, Object>> listOfFetchedDataMap=  new ArrayList<Map<String,Object>>();
+		for (Map<String, Object> fetchedDataMap : fetchedData) {
+			
+			fetchedDataMap.put("confirmedCasesDiff",0);
+			fetchedDataMap.put("recoveredCasesDiff", 0);
+			fetchedDataMap.put("deceasedCasesDiff", 0);
+			fetchedDataMap.put("activeCasesDiff", 0);
+			
+			fetchedDataMap.put("confirmedCases",fetchedDataMap.get("totalConfirmedCases"));
+			fetchedDataMap.put("recoveredCases", fetchedDataMap.get("totalRecoveredCases") );
+			fetchedDataMap.put("deceasedCases", fetchedDataMap.get("totalDeceasedCases") );
+			fetchedDataMap.put("activeCases",fetchedDataMap.get("totalActiveCases") );
+			
+			listOfFetchedDataMap.add(fetchedDataMap);
+		}
+		TrackerData trackerData = new TrackerData();
+		trackerData.setData(listOfFetchedDataMap);
+		trackerData.setCreatedDate(new Date());
+		trackerData.setUpdatedDate(new Date());
+		trackerData.setDbDate(new SimpleDateFormat("dd-MM-yyyy").format(Calendar.getInstance().getTime()));
+		trackerDataRepository.save(trackerData);
+	}
+
+	@Override
+	public ResponseEntity<TrackerData> getTabularData(String date) {
+		TrackerData fetchedTrackerData = null;
+		if(date==null) {
+		fetchedTrackerData = trackerDataRepository.findTop1ByOrderByIdDesc();
+		}
+		else {
+			fetchedTrackerData=trackerDataRepository.findByDbDate(date);	
+		}
+		return new ResponseEntity<TrackerData>(fetchedTrackerData, HttpStatus.OK);
+	}
+	
+}

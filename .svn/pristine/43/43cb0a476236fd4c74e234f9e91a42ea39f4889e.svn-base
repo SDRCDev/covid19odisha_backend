@@ -1,0 +1,24 @@
+package com.sdrc.covid19odisha.services;
+
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.Task;
+import com.sdrc.covid19odisha.repositories.TaskRepository;
+
+@Service
+public class TaskServiceImpl implements TaskService {
+
+	@Autowired
+	private TaskRepository taskRepository;
+	@Override
+	public void saveTask(Map<String, Object> data) {
+		// TODO Auto-generated method stub
+		Task task = new Task();
+		task.setData(data);
+		taskRepository.save(task);
+	}
+
+}

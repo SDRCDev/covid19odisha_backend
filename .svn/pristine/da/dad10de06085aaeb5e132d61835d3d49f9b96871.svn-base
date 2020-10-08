@@ -1,0 +1,295 @@
+package com.sdrc.covid19odisha.services;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.sdrc.mongoclientdetails.MongoClientDetails;
+import org.sdrc.mongoclientdetails.repository.MongoClientDetailsRepository;
+import org.sdrc.usermgmt.mongodb.domain.Authority;
+import org.sdrc.usermgmt.mongodb.domain.Designation;
+import org.sdrc.usermgmt.mongodb.domain.DesignationAuthorityMapping;
+import org.sdrc.usermgmt.mongodb.repository.AuthorityRepository;
+import org.sdrc.usermgmt.mongodb.repository.DesignationAuthorityMappingRepository;
+import org.sdrc.usermgmt.mongodb.repository.DesignationRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.SubmissionRepository;
+
+
+/**
+ * @author Debiprasad Parida (debiprasad@sdrc.co.in)
+ */
+@Service
+public class ConfigurationServiceImpl implements ConfigurationService {
+
+	@Autowired
+	private MongoClientDetailsRepository mongoClientDetailsRepository;
+
+	
+
+	@Autowired
+	AreaRepository areaRepository;
+
+	@Autowired
+	AuthorityRepository authorityRepository;
+
+	@Autowired
+	DesignationAuthorityMappingRepository designationAuthorityMappingRepository;
+
+	@Autowired
+	DesignationRepository designationRepository;
+	
+	@Autowired 
+	SubmissionRepository submissionRepository;
+
+	@Override
+	public String createMongoOauth2Client() {
+
+		try {
+
+			MongoClientDetails mongoClientDetails = new MongoClientDetails();
+
+			HashSet<String> scopeSet = new HashSet<>();
+			scopeSet.add("read");
+			scopeSet.add("write");
+
+			List<GrantedAuthority> authorities = new ArrayList<>();
+			authorities.add(new SimpleGrantedAuthority("dashboard"));
+
+			Set<String> authorizedGrantTypes = new HashSet<>();
+			authorizedGrantTypes.add("refresh_token");
+			authorizedGrantTypes.add("client_credentials");
+			authorizedGrantTypes.add("password");
+
+			Set<String> resourceIds = new HashSet<>();
+			resourceIds.add("web-service");
+
+			mongoClientDetails.setClientId("covid19odisha");
+			mongoClientDetails.setClientSecret("covid19odisha@123#!");
+			mongoClientDetails.setScope(scopeSet);
+			mongoClientDetails.setAccessTokenValiditySeconds(30000);
+			mongoClientDetails.setRefreshTokenValiditySeconds(40000);
+			mongoClientDetails.setAuthorities(authorities);
+			mongoClientDetails.setAuthorizedGrantTypes(authorizedGrantTypes);
+			mongoClientDetails.setResourceIds(resourceIds);
+
+			mongoClientDetailsRepository.save(mongoClientDetails);
+			return "success";
+
+		} catch (Exception e) {
+
+			throw new RuntimeException(e);
+		}
+
+	}
+
+	@Override
+	public ResponseEntity<String> config() {
+		// create designation
+		List<Designation> designationList = new ArrayList<>();
+
+		Designation desg = new Designation();
+		desg.setCode("Admin");
+		desg.setName("Admin");
+		desg.setSlugId(1);
+		designationList.add(desg);
+		
+		/*desg = new Designation();
+		desg.setCode("State Level");
+		desg.setName("State Level");
+		desg.setSlugId(1);
+		designationList.add(desg);
+
+		desg = new Designation();
+		desg.setCode("District Level");
+		desg.setName("District Level");
+		desg.setSlugId(2);
+		designationList.add(desg);*/
+		
+		
+		
+		//designationRepository.save(designationList);
+
+		// create Authority
+
+		List<Authority> authorityList = new ArrayList<>();
+
+		Authority authority = new Authority();
+		authority.setAuthority("USER_MGMT_ALL_API");
+		authority.setDescription("Allow user to manage usermanagement module");
+		authorityList.add(authority);
+
+		authority = new Authority();
+		authority.setAuthority("CREATE_USER");
+		authority.setDescription("Allow user to access createuser API");
+		authorityList.add(authority);
+		
+		authority = new Authority();
+		authority.setAuthority("CHANGE_PASSWORD");
+		authority.setDescription("Allow user to access changepassword API");
+		authorityList.add(authority);
+		
+		authority = new Authority();
+		authority.setAuthority("UPDATE_USER");
+		authority.setDescription("Allow user to access updateuser API");
+		authorityList.add(authority);
+		
+		authority = new Authority();
+		authority.setAuthority("ENABLE_DISABLE_USER");
+		authority.setDescription("Allow user to access enable/disable user API");
+		authorityList.add(authority);
+		
+		authority = new Authority();
+		authority.setAuthority("RESET_PASSWORD");
+		authority.setDescription("Allow user to access resetpassword API");
+		authorityList.add(authority);
+		
+		authority = new Authority();
+		authority.setAuthority("dataentry_HAVING_write");
+		authority.setDescription("Allow user to  dataentry module");
+		authorityList.add(authority);
+		
+		authority = new Authority();
+		authority.setAuthority("DOWNLOAD_RAWDATA_REPORT");
+		authority.setDescription("Allow user to  download raw data report");
+		authorityList.add(authority);
+
+		
+		authority = new Authority();
+		authority.setAuthority("CMS_Admin");
+		authority.setDescription("Allow user to access ADMIN CMS");
+		authorityList.add(authority);
+		
+	
+		
+		//authorityRepository.save(authorityList);
+
+		// Designation-Authority Mapping
+
+		List<DesignationAuthorityMapping> damList = new ArrayList<>();
+
+		DesignationAuthorityMapping dam = new DesignationAuthorityMapping();
+
+		/**
+		 * admin
+		 */
+		dam.setAuthority(authorityRepository.findByAuthority("USER_MGMT_ALL_API"));
+		dam.setDesignation(designationRepository.findByCode("ADMIN"));
+		damList.add(dam);
+		
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("DOWNLOAD_RAWDATA_REPORT"));
+		dam.setDesignation(designationRepository.findByCode("ADMIN"));
+		damList.add(dam);
+		
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("CMS_Admin"));
+		dam.setDesignation(designationRepository.findByCode("ADMIN"));
+		damList.add(dam);
+		
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("dataentry_HAVING_write"));
+		dam.setDesignation(designationRepository.findByCode("ADMIN"));
+		damList.add(dam);
+		
+		/**
+		 * partner admin
+		 */
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("CHANGE_PASSWORD"));
+		dam.setDesignation(designationRepository.findByCode("State Level"));
+		damList.add(dam);
+		
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("DOWNLOAD_RAWDATA_REPORT"));
+		dam.setDesignation(designationRepository.findByCode("State Level"));
+		damList.add(dam);
+		/**
+		 * District Level
+		 */
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("CHANGE_PASSWORD"));
+		dam.setDesignation(designationRepository.findByCode("District Level"));
+		damList.add(dam);
+		
+		dam = new DesignationAuthorityMapping();
+		dam.setAuthority(authorityRepository.findByAuthority("DOWNLOAD_RAWDATA_REPORT"));
+		dam.setDesignation(designationRepository.findByCode("District Level"));
+		damList.add(dam);
+		
+		
+		
+		designationAuthorityMappingRepository.save(damList);
+		return new ResponseEntity<String>("success", HttpStatus.OK);
+	}
+
+	@Override
+	public ResponseEntity<Map<String, Integer>> getIndicatorValue() {
+		List<SubmissionData> listOfSubmissionData = submissionRepository.findByIsVerifiedTrue();
+		Map<String, Integer> mapOfIndecatorValue = new LinkedHashMap<String, Integer>();
+		int volunteersregistered = 0;
+		int institutionsregistered = 0;
+		Set<Integer> districtsSet = new HashSet<Integer>();
+		Set<Integer> blocksSet = new HashSet<Integer>();
+		for (SubmissionData submissionData : listOfSubmissionData) {
+			if (submissionData.getData().get("fullName") != null) {
+				volunteersregistered += 1;
+
+				if ((Integer) submissionData.getData().get("areaLevel") == 1) {
+					List<Integer> districtList = (List<Integer>) submissionData.getData().get("preferredDistrict");
+					for (Integer integer : districtList) {
+						districtsSet.add(integer);
+					}
+				} else if ((Integer) submissionData.getData().get("areaLevel") == 2) {
+					Integer disrict = (Integer) submissionData.getData().get("preferredDistrict");
+					districtsSet.add(disrict);
+					List<Integer> blocklList = (List<Integer>) submissionData.getData().get("preferredBlock");
+					for (Integer integer : blocklList) {
+						blocksSet.add(integer);
+					}
+				} else if ((Integer) submissionData.getData().get("areaLevel") == 3) {
+					Integer disrict = (Integer) submissionData.getData().get("preferredDistrict");
+					districtsSet.add(disrict);
+					Integer block = (Integer) submissionData.getData().get("preferredBlock");
+					blocksSet.add(block);
+				}
+
+			} else if (submissionData.getData().get("organizationName") != null) {
+				institutionsregistered += 1;
+				
+				if ((Integer) submissionData.getData().get("areaOfService") == 106) {
+					List<Integer> districtList = (List<Integer>) submissionData.getData().get("preferredDistrict");
+					for (Integer integer : districtList) {
+						districtsSet.add(integer);
+					}
+				} else if ((Integer) submissionData.getData().get("areaOfService") == 107) {
+					Integer disrict = (Integer) submissionData.getData().get("preferredDistrict");
+					districtsSet.add(disrict);
+					List<Integer> blocklList = (List<Integer>) submissionData.getData().get("preferredBlock");
+					for (Integer integer : blocklList) {
+						blocksSet.add(integer);
+					}
+				} 
+			}
+
+		}
+		mapOfIndecatorValue.put("Volunteers Registered", volunteersregistered);
+		mapOfIndecatorValue.put("InstitutionsRegistered", institutionsregistered);
+		mapOfIndecatorValue.put("Districts", districtsSet.size());
+		mapOfIndecatorValue.put("Blocks", blocksSet.size());
+		return new ResponseEntity<Map<String, Integer>>(mapOfIndecatorValue, HttpStatus.OK);
+	}
+
+	
+}

@@ -1,0 +1,530 @@
+package com.sdrc.covid19odisha.services;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import javax.servlet.ServletContext;
+
+import org.sdrc.usermgmt.mongodb.domain.Account;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.itextpdf.text.Document;
+import com.itextpdf.text.Element;
+import com.itextpdf.text.Font;
+import com.itextpdf.text.PageSize;
+import com.itextpdf.text.Paragraph;
+import com.itextpdf.text.pdf.BaseFont;
+import com.itextpdf.text.pdf.ColumnText;
+import com.itextpdf.text.pdf.PdfContentByte;
+import com.itextpdf.text.pdf.PdfReader;
+import com.itextpdf.text.pdf.PdfStamper;
+import com.itextpdf.text.pdf.PdfWriter;
+import com.sdrc.covid19odisha.collections.Area;
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.collections.Task;
+import com.sdrc.covid19odisha.models.FilterParams;
+import com.sdrc.covid19odisha.models.UserDetails;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.CustomAccountRepository;
+import com.sdrc.covid19odisha.repositories.SubmissionRepository;
+import com.sdrc.covid19odisha.repositories.TaskRepository;
+import com.sdrc.covid19odisha.repositories.TypeDetailRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
+@Service
+@Slf4j
+public class TaskServiceImpl implements TaskService {
+
+	@Autowired
+	private TaskRepository taskRepository;
+
+	@Autowired
+	private MongoTemplate mongoTemplate;
+
+	@Autowired
+	private ConfigurableEnvironment configurableEnvironment;
+
+	@Autowired
+	@Qualifier("customAccountRepository")
+	private CustomAccountRepository customAccountRepository;
+
+	@Autowired
+	private SubmissionRepository submissionRepository;
+
+	@Autowired
+	private TypeDetailRepository typeDetailRepository;
+
+	@Autowired
+	private ServletContext context;
+
+	@Autowired
+	private AreaRepository areaRepository;
+
+	@Override
+	public void saveTask(Map<String, Object> data) {
+		// TODO Auto-generated method stub
+		Task task = new Task();
+		task.setCreatedDate(new Date());
+		task.setData(data);
+		try {
+			Task reps = taskRepository.save(task);
+			// Updating the asigned task status of volunteer
+			SubmissionData volunteer = submissionRepository
+					.getSubmissionByMobileNumber(String.valueOf(data.get("mobile")));
+			volunteer.setIsAssignedTask(true);
+			submissionRepository.save(volunteer);
+			if (reps != null)
+				sendConfirmationMessage(data);
+		} catch (Exception e) {
+			log.error("Action : while saveTask in TaskAssignment  with payload {}", data, e);
+		}
+
+	}
+
+	public Integer sendConfirmationMessage(Map<String, Object> data) {
+		RestTemplate restTemplate = new RestTemplate();
+		int status = 0;
+		String url = configurableEnvironment.getProperty("msg.url.and.credential");
+		String msgType = configurableEnvironment.getProperty("msg.type");
+		String callBackURL = configurableEnvironment.getProperty("callback.url");
+		String senderId = configurableEnvironment.getProperty("sender.id");
+		String password = configurableEnvironment.getProperty("password");
+		String version = configurableEnvironment.getProperty("version");
+
+		String message = "Dear Volunteer,\r\n" + "\r\n" + "Contact for COVID19 response task.\r\n" + "Coordinator: "
+				+ String.valueOf(data.get("contactPerson")) + "\r\n" + "Mob: "
+				+ String.valueOf(data.get("contactPersonMobile")) + "\r\n" + "\r\n" + "regards,\r\n" + "OSDMA";
+		String urlMSG = url + password + version + data.get("mobile") + msgType + message + senderId + callBackURL;
+		ResponseEntity<String> entity = null;
+		try {
+			entity = restTemplate.exchange(urlMSG, HttpMethod.GET, null, String.class);
+			JsonObject responseJson = new Gson().fromJson(entity.getBody(), JsonObject.class);
+			status = responseJson.getAsJsonObject("result").getAsJsonObject("status").get("statusCode").getAsInt();
+
+			if (status == 0) {
+
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		return status;
+	}
+
+	@Override
+	public Map<String, List<?>> getTaskList(String mobile) {
+		// TODO Auto-generated method stub
+		SimpleDateFormat formatter = new SimpleDateFormat("dd/MM/yyyy");
+
+		Map<String, List<?>> table = new HashMap<String, List<?>>();
+		List<String> header = Arrays.asList("Activity Type", "Activity Details", "Coordinator Name",
+				"Coordinator Mobile No.", "Assigned Date");
+		List<Map<String, Object>> tasks = new ArrayList<Map<String, Object>>();
+		taskRepository.getByMobileNumber(mobile).forEach(x -> {
+			Map<String, Object> taskMap = new HashMap<>();
+			taskMap.put("Activity Type", x.getData().get("task"));
+			taskMap.put("Activity Details", x.getData().get("details"));
+			taskMap.put("Coordinator Name", x.getData().get("contactPerson"));
+			taskMap.put("Coordinator Mobile No.", x.getData().get("contactPersonMobile"));
+			taskMap.put("Assigned Date", x.getCreatedDate() != null ? formatter.format(x.getCreatedDate()) : "NA");
+			tasks.add(taskMap);
+		});
+		table.put("tableColumn", header);
+		table.put("tableData", tasks);
+		return table;
+	}
+
+	@Override
+	public Map<String, List<?>> getFilteredVolunteers(FilterParams params) {
+
+		Integer areaLevel = params.getAreaLevel();
+		List<Integer> districts = params.getDistricts();
+		List<Integer> blocks = params.getBlocks();
+		List<Integer> gps = params.getGps();
+		List<Integer> genders = params.getGenders();
+		List<Integer> qualifications = params.getQualifications();
+		List<Integer> vocationals = params.getVocationals();
+		List<Integer> professions = params.getProfessions();
+		List<Integer> availability = params.getAvailability();
+		List<Integer> workFrom = params.getWorkFrom();
+		List<Integer> workTime = params.getWorkTime();
+		List<Integer> awareness = params.getAwareness();
+		List<Integer> fieldSupport = params.getFieldSupport();
+		List<Integer> essentials = params.getEssentials();
+		List<Integer> health = params.getHealth();
+		List<Integer> reliefCampMgmt = params.getReliefCampMgmt();
+		Boolean isAssignedTask = params.getIsAssignedTask();
+
+		Account acc = customAccountRepository
+				.findByUserName(SecurityContextHolder.getContext().getAuthentication().getName());
+		UserDetails user = acc != null ? (UserDetails) acc.getUserDetails() : null;
+
+//		if(user!=null && !user.getAreaId().contains(2)) {
+//			districts = user.getAreaId();
+//		} 
+		String areaLevelPath = "data.state";
+		Integer areaId = 2;
+		if (user != null && user.getAreaId().contains(2)) {
+			areaLevelPath = "data.state";
+			areaId = user.getAreaId().get(0);
+		} else if (user != null) {
+			areaLevelPath = "data.preferredDistrict";
+			areaId = user.getAreaId().get(0);
+		}
+
+		Query dynamicQuery = new Query();
+		Criteria commonCriteria = Criteria.where("formId").is(1).and("isVerified").is(true).and(areaLevelPath)
+				.is(areaId);
+		dynamicQuery.addCriteria(commonCriteria);
+		if (areaLevel != null) {
+			if (districts.contains(null)) {
+				districts = Arrays.asList();
+			}
+			if (blocks.contains(null)) {
+				blocks = Arrays.asList();
+			}
+			if (gps.contains(null)) {
+				gps = Arrays.asList();
+			}
+			Criteria areaLevelCriteria = Criteria.where("data.areaLevel").is(areaLevel);
+			dynamicQuery.addCriteria(areaLevelCriteria);
+		}
+
+		if (districts != null && districts.size() != 0) {
+			Criteria districtCriteria = Criteria.where("data.preferredDistrict").in(districts);
+			dynamicQuery.addCriteria(districtCriteria);
+		}
+
+		if (blocks != null && blocks.size() != 0) {
+			Criteria blockCriteria = Criteria.where("data.preferredBlock").in(blocks);
+			dynamicQuery.addCriteria(blockCriteria);
+		}
+
+		if (gps != null && gps.size() != 0) {
+			Criteria gpCriteria = Criteria.where("data.preferredGP").in(gps);
+			dynamicQuery.addCriteria(gpCriteria);
+		}
+
+		if (genders != null && genders.size() != 0) {
+			Criteria genderCriteria = Criteria.where("data.sex").in(genders);
+			dynamicQuery.addCriteria(genderCriteria);
+		}
+
+		if (qualifications != null && qualifications.size() != 0) {
+			Criteria qualificationsCriteria = Criteria.where("data.qualification").in(qualifications);
+			dynamicQuery.addCriteria(qualificationsCriteria);
+		}
+
+		if (professions != null && professions.size() != 0) {
+			Criteria professionsCriteria = Criteria.where("data.specification").in(professions);
+			dynamicQuery.addCriteria(professionsCriteria);
+		}
+
+		if (vocationals != null && vocationals.size() != 0) {
+			Criteria vocationalsCriteria = Criteria.where("data.vocational").in(vocationals);
+			dynamicQuery.addCriteria(vocationalsCriteria);
+		}
+
+		if (availability != null && availability.size() != 0) {
+			Criteria availabilityCriteria = Criteria.where("data.availability").in(availability);
+			dynamicQuery.addCriteria(availabilityCriteria);
+		}
+
+		if (workFrom != null && workFrom.size() != 0) {
+			Criteria workFromCriteria = Criteria.where("data.howVolunteer").in(workFrom);
+			dynamicQuery.addCriteria(workFromCriteria);
+		}
+
+		if (workTime != null && workTime.size() != 0) {
+			Criteria workTimeCriteria = Criteria.where("data.volunteerTime").in(workTime);
+			dynamicQuery.addCriteria(workTimeCriteria);
+		}
+
+		if (awareness != null && awareness.size() != 0) {
+			Criteria awarenessCriteria = Criteria.where("data.awareness").in(awareness);
+			dynamicQuery.addCriteria(awarenessCriteria);
+		}
+
+		if (fieldSupport != null && fieldSupport.size() != 0) {
+			Criteria fieldSupportCriteria = Criteria.where("data.fieldSupport").in(fieldSupport);
+			dynamicQuery.addCriteria(fieldSupportCriteria);
+		}
+
+		if (essentials != null && essentials.size() != 0) {
+			Criteria essentialsCriteria = Criteria.where("data.essentials").in(essentials);
+			dynamicQuery.addCriteria(essentialsCriteria);
+		}
+
+		if (health != null && health.size() != 0) {
+			Criteria healthCriteria = Criteria.where("data.health").in(health);
+			dynamicQuery.addCriteria(healthCriteria);
+		}
+
+		if (reliefCampMgmt != null && reliefCampMgmt.size() != 0) {
+			Criteria reliefCampMgmtCriteria = Criteria.where("data.reliefCampMgmt").in(reliefCampMgmt);
+			dynamicQuery.addCriteria(reliefCampMgmtCriteria);
+		}
+		if (params.getFromDate() != null && params.getToDate() != null) {
+			Date toDate = params.getToDate();
+			Calendar c = Calendar.getInstance();
+			c.setTime(toDate);
+			c.add(Calendar.DATE, 1);
+			toDate = c.getTime();
+
+			Criteria dateCriteria = Criteria.where("createdDate").gte(params.getFromDate()).lt(toDate);
+			dynamicQuery.addCriteria(dateCriteria);
+		}
+		if (isAssignedTask != null) {
+			Criteria taskAssignmentCriteria = Criteria.where("isAssignedTask").is(isAssignedTask);
+			dynamicQuery.addCriteria(taskAssignmentCriteria);
+		}
+
+		List<SubmissionData> filteredSubmissions = mongoTemplate.find(dynamicQuery, SubmissionData.class,
+				"submissionData");
+		List<Map<String, Object>> resp_object = new ArrayList<>();
+		List<String> headers = Arrays.asList("Name", "Mobile", "Preferred Activity");
+		Map<String, List<?>> resp = new HashMap<String, List<?>>();
+		filteredSubmissions.forEach(v -> {
+			Map<String, Object> volunteer = new HashMap<>();
+			String service = "";
+			service = v.getData().get("awareness") != null ? service + "Public awareness and Information," : service;
+			service = v.getData().get("fieldSupport") != null ? service + "On-field support," : service;
+			service = v.getData().get("essentials") != null ? service + "Essential services," : service;
+			service = v.getData().get("health") != null ? service + "Health," : service;
+			service = v.getData().get("reliefCampMgmt") != null ? service + "Relief Camp Management," : service;
+
+			volunteer.put("Name", String.valueOf(v.getData().get("fullName")));
+			volunteer.put("Mobile", String.valueOf(v.getData().get("mobile")));
+			volunteer.put("Preferred Activity",
+					service.length() > 1 ? service.substring(0, service.length() - 1) : service);
+			volunteer.put("isAssignedTask", v.getIsAssignedTask());
+			volunteer.put("formId", v.getFormId());
+			volunteer.put("deactivated",
+					v.getData().get("deactivated") != null
+							? Boolean.parseBoolean(String.valueOf(v.getData().get("deactivated")))
+							: false);
+
+			resp_object.add(volunteer);
+		});
+
+		resp.put("tableColumn", headers);
+		resp.put("tableData", resp_object);
+		return resp;
+
+	}
+
+	@Override
+	public Map<String, List<?>> getFilteredOrganizations(FilterParams params) {
+
+		Integer areaLevel = params.getAreaLevel();
+		List<Integer> districts = params.getDistricts();
+		List<Integer> blocks = params.getBlocks();
+		Integer serviceType = params.getServiceType();
+		Boolean isAssignedTask = params.getIsAssignedTask();
+		Integer organizationType = params.getOrganizationType();
+
+		Account acc = customAccountRepository
+				.findByUserName(SecurityContextHolder.getContext().getAuthentication().getName());
+		UserDetails user = acc != null ? (UserDetails) acc.getUserDetails() : null;
+
+//		if(user!=null && !user.getAreaId().contains(2)) {
+//			districts = user.getAreaId();
+//		} 
+
+		String areaLevelPath = "data.state";
+		Integer areaId = 2;
+		if (user != null && user.getAreaId().contains(2)) {
+			areaLevelPath = "data.preferredState";
+			areaId = user.getAreaId().get(0);
+		} else if (user != null) {
+			areaLevelPath = "data.preferredDistrict";
+			areaId = user.getAreaId().get(0);
+		}
+
+		Query dynamicQuery = new Query();
+		Criteria commonCriteria = Criteria.where("formId").is(2).and("isVerified").is(true).and(areaLevelPath)
+				.is(areaId);
+		dynamicQuery.addCriteria(commonCriteria);
+		if (areaLevel != null) {
+			if (districts.contains(null)) {
+				districts = Arrays.asList();
+			}
+			if (blocks == null || blocks.contains(null)) {
+				blocks = Arrays.asList();
+			}
+			Criteria areaLevelCriteria = Criteria.where("data.areaOfService").is(areaLevel);
+			dynamicQuery.addCriteria(areaLevelCriteria);
+		}
+
+		if (districts != null && districts.size() != 0) {
+			Criteria districtCriteria = Criteria.where("data.preferredDistrict").in(districts);
+			dynamicQuery.addCriteria(districtCriteria);
+		}
+
+		if (blocks != null && blocks.size() != 0) {
+			Criteria blockCriteria = Criteria.where("data.preferredBlock").in(blocks);
+			dynamicQuery.addCriteria(blockCriteria);
+		}
+
+		if (serviceType != null) {
+			Criteria serviceTypeCriteria = Criteria.where("data.serviceType").is(serviceType);
+			dynamicQuery.addCriteria(serviceTypeCriteria);
+		}
+
+		if (organizationType != null) {
+			Criteria organizationTypeCriteria = Criteria.where("data.organizationType").is(organizationType);
+			dynamicQuery.addCriteria(organizationTypeCriteria);
+		}
+
+		if (params.getFromDate() != null && params.getToDate() != null) {
+			Date toDate = params.getToDate();
+			Calendar c = Calendar.getInstance();
+			c.setTime(toDate);
+			c.add(Calendar.DATE, 1);
+			toDate = c.getTime();
+
+			Criteria dateCriteria = Criteria.where("createdDate").gte(params.getFromDate()).lt(toDate);
+			dynamicQuery.addCriteria(dateCriteria);
+		}
+
+		if (isAssignedTask != null) {
+			Criteria taskAssignmentCriteria = Criteria.where("isAssignedTask").is(isAssignedTask);
+			dynamicQuery.addCriteria(taskAssignmentCriteria);
+		}
+
+		List<SubmissionData> filteredSubmissions = mongoTemplate.find(dynamicQuery, SubmissionData.class,
+				"submissionData");
+		List<Map<String, Object>> resp_object = new ArrayList<>();
+		List<String> headers = Arrays.asList("Name", "Mobile", "Preferred Activity");
+		Map<String, List<?>> resp = new HashMap<String, List<?>>();
+		filteredSubmissions.forEach(v -> {
+			Map<String, Object> organization = new HashMap<>();
+			String service = "";
+			service = v.getData().get("serviceType") != null
+					? typeDetailRepository
+							.findBySlugId(Integer.parseInt(String.valueOf(v.getData().get("serviceType")))).getName()
+					: "NA";
+
+			organization.put("Name", String.valueOf(v.getData().get("organizationName")));
+			organization.put("Mobile", String.valueOf(v.getData().get("mobile")));
+			organization.put("Preferred Activity", service);
+			organization.put("formId", v.getFormId());
+			organization.put("isAssignedTask", v.getIsAssignedTask());
+			organization.put("deactivated",
+					v.getData().get("deactivated") != null
+							? Boolean.parseBoolean(String.valueOf(v.getData().get("deactivated")))
+							: false);
+
+			resp_object.add(organization);
+		});
+
+		resp.put("tableColumn", headers);
+		resp.put("tableData", resp_object);
+		return resp;
+
+	}
+
+	
+
+	@Override
+	public void deactivateVolunteer(Map<String, Object> data) {
+		// TODO Auto-generated method stub
+		SubmissionData volunteer = submissionRepository.getSubmissionByMobileNumber(String.valueOf(data.get("mobile")));
+		volunteer.getData().put("deactivated", Boolean.parseBoolean(String.valueOf(data.get("deactivated"))));
+		volunteer.getData().put("remark", String.valueOf(data.get("remark")));
+		submissionRepository.save(volunteer);
+	}
+	
+	
+	@Override
+	public ResponseEntity<String> generateCertificate(String mobile) {
+
+		String outputPath = null;
+		Document document = new Document(PageSize.A4.rotate());
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		try {
+			List<Area> areaList = areaRepository.findAll();
+
+			Map<Integer, String> areaMap = areaList.stream()
+					.collect(Collectors.toMap(Area::getAreaId, Area::getAreaName));
+			PdfReader pdfReader = new PdfReader(context.getRealPath("template//Certificate.pdf"));
+
+			String dir = configurableEnvironment.getProperty("report.path");
+			File file = new File(dir);
+			if (!file.exists())
+				file.mkdirs();
+
+			String name = "Covid19_volunteer_certificate" + "_" + new SimpleDateFormat("ddMMyyyyHHmmssSSSSSSS").format(new Date())
+					+ ".pdf";
+			outputPath = dir + "" + name;
+			OutputStream fos = new FileOutputStream(new File(outputPath));
+			PdfStamper pdfStamper = new PdfStamper(pdfReader, fos);
+			PdfContentByte canvas = pdfStamper.getOverContent(1);
+
+			SubmissionData volunterDetails = submissionRepository.getSubmissionByMobileNumber(mobile);
+
+			PdfWriter writer = PdfWriter.getInstance(document, out);
+			document.setMargins(document.leftMargin(), document.rightMargin(), 0, document.bottomMargin());
+//			HeaderFooter headerFooter = new HeaderFooter(context, "Weekly", createdDate, domainName);
+//			writer.setPageEvent(headerFooter);
+			writer.setFullCompression();
+
+			BaseFont base = BaseFont.createFont(context.getRealPath("template//font//Poppins-Regular.ttf"),
+					BaseFont.WINANSI, BaseFont.EMBEDDED);
+			Font cfont = new Font(base, 17f, Font.NORMAL);
+
+			Font boldFont = new Font(Font.FontFamily.HELVETICA, 14, Font.BOLD);
+			Font normalFont = new Font(Font.FontFamily.HELVETICA, 17, Font.NORMAL);
+			Paragraph p;
+			if(volunterDetails.getFormId()==1)
+					p = new Paragraph(
+					volunterDetails.getData().get("salutation") + " " + volunterDetails.getData().get("fullName"),
+					cfont);
+			else
+				p = new Paragraph(volunterDetails.getData().get("organizationName").toString() ,cfont);
+			
+			p.setAlignment(Element.ALIGN_CENTER);
+
+			Paragraph p2 = new Paragraph(areaMap.get(volunterDetails.getData().get("district")), cfont);
+			p2.setAlignment(Element.ALIGN_CENTER);
+
+			ColumnText.showTextAligned(canvas, Element.ALIGN_CENTER, p, 420, 278, 0);
+			ColumnText.showTextAligned(canvas, Element.ALIGN_CENTER, p2, 410, 195, 0);
+
+			out.writeTo(fos);
+			pdfStamper.close();
+			out.close();
+			fos.close();
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		return  new ResponseEntity<String>(outputPath, HttpStatus.OK);
+	}
+}

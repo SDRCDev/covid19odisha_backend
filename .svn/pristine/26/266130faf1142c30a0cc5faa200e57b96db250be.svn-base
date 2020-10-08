@@ -1,0 +1,55 @@
+package com.sdrc.covid19odisha.services;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.Area;
+import com.sdrc.covid19odisha.collections.Type;
+import com.sdrc.covid19odisha.collections.TypeDetail;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.TypeDetailRepository;
+import com.sdrc.covid19odisha.repositories.TypeRepository;
+
+@Service
+public class MasterDataApiServiceImp implements MasterDataApiService {
+
+	@Autowired
+	private AreaRepository areaRepository;
+	
+	@Autowired
+	private TypeDetailRepository typeDetailRepository;
+	
+	@Autowired
+	private TypeRepository typeRepository;
+	
+	@Override
+	public List<Area> getAreaList(Integer areaLevelId, Integer parentAreaId) {
+			return areaRepository.findByAreaLevelAreaLevelIdAndParentAreaId(areaLevelId, parentAreaId);
+	}
+
+	@Override
+	public Map<String, List<TypeDetail>> getOptions() {
+		List<TypeDetail> typeDetails = typeDetailRepository.findByOrderByOrderLevelAsc();
+		List<Type> typeList = typeRepository.findAll();
+		Map<String, List<TypeDetail>> optionmap = new HashMap<>();
+		
+		typeList.forEach(type -> {
+			optionmap.put(type.getTypeName(), typeDetails.stream().filter(td -> td.getTypeId()==type.getSlugId()).collect(Collectors.toList()));
+		});
+		return optionmap;
+	}
+
+	@Override
+	public void updateOption(Map<String, Object> option) {
+		// TODO Auto-generated method stub
+		TypeDetail td = typeDetailRepository.findBySlugId(Integer.parseInt(String.valueOf(option.get("id"))));
+		td.setName(String.valueOf(option.get("name")));
+		typeDetailRepository.save(td);
+	}
+
+}

@@ -1,0 +1,336 @@
+package com.sdrc.covid19odisha.services;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
+import org.sdrc.usermgmt.mongodb.domain.Account;
+import org.sdrc.usermgmt.mongodb.domain.AssignedDesignations;
+import org.sdrc.usermgmt.mongodb.domain.Designation;
+import org.sdrc.usermgmt.mongodb.repository.DesignationRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.RegistrationOTP;
+import com.sdrc.covid19odisha.models.AccountTableJSONModel;
+import com.sdrc.covid19odisha.models.RejectionModel;
+import com.sdrc.covid19odisha.models.UserApprovalModel;
+import com.sdrc.covid19odisha.models.UserDetails;
+import com.sdrc.covid19odisha.models.UserStatus;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.CustomAccountRepository;
+import com.sdrc.covid19odisha.repositories.RegistrationOTPRepository;
+import com.sdrc.covid19odisha.utils.MailModel;
+import com.sdrc.covid19odisha.utils.SendMailService;
+
+@Service
+public class UserRegistrationServiceImpl implements UserRegistrationService {
+	
+	@Qualifier("mongoDesignationRepository")
+	@Autowired
+	private DesignationRepository designationRepository;
+	
+	@Autowired
+	private ConfigurableEnvironment configurableEnvironment;
+	
+	@Autowired
+	private RegistrationOTPRepository registrationOTPRepository;
+	
+	@Autowired
+	private SendMailService mailService;
+	
+	@Autowired
+	private AreaRepository areaRepository;
+	
+	@Autowired
+	@Qualifier("customAccountRepository")
+	private CustomAccountRepository customAccountRepository;
+	
+	@Override
+	public List<Designation> getAllRoles() {
+		List<Designation> desgList = designationRepository.findAllByOrderByIdAsc();
+
+		if ((!configurableEnvironment.containsProperty("allow.admin.creation"))
+				|| (configurableEnvironment.getProperty("allow.admin.creation").equals("false"))) {
+
+			desgList = desgList.stream().filter(desgName -> !"ADMIN".equals(desgName.getName()))
+					.collect(Collectors.toList());
+		}
+		return desgList;
+	}
+
+	@Override
+	public ResponseEntity<String> getEmailVerificationCode(String email) {
+		try {
+			Random random = new Random();
+			int otp = random
+					.nextInt(Integer.parseInt(configurableEnvironment.getProperty("generate.otp.max.digit"))
+							- Integer.parseInt(configurableEnvironment.getProperty("generate.otp.min.digit")) + 1)
+					+ Integer.parseInt(configurableEnvironment.getProperty("generate.otp.min.digit"));
+
+			RegistrationOTP reOtp = registrationOTPRepository.findByEmailIdAndIsActiveTrue(email);
+			ExecutorService emailExecutor = Executors.newSingleThreadExecutor();
+			if (reOtp == null) {
+				emailExecutor.execute(new Runnable() {
+					@Override
+					public void run() {
+						try {
+							createNewOTPAndSendMail(email, String.valueOf(otp));
+							// SendEmailUtility.sendmail(emaildummy);
+						} catch (Exception e) {
+							// logger.error("failed", e);
+						}
+					}
+				});
+			
+				} else {
+				reOtp.setIsActive(false);
+				registrationOTPRepository.save(reOtp);
+
+				emailExecutor.execute(new Runnable() {
+					@Override
+					public void run() {
+						try {
+							createNewOTPAndSendMail(email, String.valueOf(otp));
+							// SendEmailUtility.sendmail(emaildummy);
+						} catch (Exception e) {
+							// logger.error("failed", e);
+						}
+					}
+				});
+				}
+			
+				//	createNewOTPAndSendMail(email, String.valueOf(otp));
+			emailExecutor.shutdown();
+			
+			
+			return new ResponseEntity<>("OTP has been sent to your email", HttpStatus.OK);
+		} catch (Exception e) {
+			e.printStackTrace();
+			// return null;
+			return new ResponseEntity<>("Try Again", HttpStatus.OK);
+		}
+	}
+
+	protected ResponseEntity<String> createNewOTPAndSendMail(String email, String varificationCode) {
+
+		RegistrationOTP registrationOTP = new RegistrationOTP();
+		registrationOTP.setEmailId(email);
+		try {
+			registrationOTP.setIpAddress(InetAddress.getLocalHost().getHostAddress());
+		} catch (UnknownHostException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		registrationOTP.setIsActive(true);
+		registrationOTP.setCreatedDateAndTime(new Timestamp(System.currentTimeMillis()));
+		registrationOTP.setVarificationCode(Integer.parseInt(varificationCode));
+		registrationOTPRepository.save(registrationOTP);
+
+		MailModel mailModel = new MailModel();
+		mailModel.setToEmailIds(Arrays.asList(email));
+		
+		mailModel.setSubject("Covid-19 Odisha: One Time Password");
+		mailModel.setToUserName("Dear User,");
+		mailModel.setMessage("\n"+"Your OTP for Covid-19 Odisha application: " + Integer.parseInt(varificationCode));
+		
+		mailModel.setFromUserName("Thank you!" + "\n"+ "\n"+ configurableEnvironment.getProperty("email.donot.reply") +"\n"+ configurableEnvironment.getProperty("email.disclaimer"));
+		mailModel.setEmail(email);
+
+		mailService.sendSimpleMessage(mailModel);
+		//collectionChannel.sendEmail().send(MessageBuilder.withPayload(mailModel).build());
+		return new ResponseEntity<>("OTP verified", HttpStatus.OK);
+		// return mailModel;
+	}
+
+	@Override
+	public ResponseEntity<String> oTPAndEmailAvailibility(String email, Integer varificationCode) {
+
+		RegistrationOTP registrationOTP = registrationOTPRepository
+				.findByEmailIdAndVarificationCodeAndIsActiveTrue(email, varificationCode);
+		if (registrationOTP != null) {
+			long minutes = TimeUnit.MILLISECONDS
+					.toMinutes(System.currentTimeMillis() - registrationOTP.getCreatedDateAndTime().getTime());
+			if (minutes <= 30) {
+				registrationOTP.setIsActive(false);
+				registrationOTPRepository.save(registrationOTP);
+				return new ResponseEntity<>("OTP verified", HttpStatus.OK);
+
+			} else {
+				registrationOTP.setIsActive(false);
+				registrationOTPRepository.save(registrationOTP);
+
+				return new ResponseEntity<>("OTP expired! Try another.", HttpStatus.OK);
+			}
+		} else {
+			return new ResponseEntity<>("Invalid OTP! Please enter valid OTP", HttpStatus.OK);
+		}
+	}
+
+	@Override
+	public AccountTableJSONModel getPartnersForApproval() {
+		List<String> tableColumn = new ArrayList<>();
+		tableColumn.add("Username");
+		tableColumn.add("Name");
+		tableColumn.add("Gender");
+		tableColumn.add("Mobile Number");
+		tableColumn.add("Designation");
+		tableColumn.add("Area");
+		tableColumn.add("Submitted On");
+		tableColumn.add("Email");
+
+		List<Map<String,Object>> tableMap = new ArrayList<>();
+		List<Account> accounts=customAccountRepository.findAll();
+		for (Account acc : accounts) {
+			if(!acc.getUserName().equals("admin")) {
+			UserDetails user = (UserDetails) acc.getUserDetails();
+			//PartnerApprovalModel model = new PartnerApprovalModel();
+			Map<String,Object> map = new LinkedHashMap<>();
+			
+			map.put("Username", acc.getUserName());
+			map.put("Name",
+					user.getFirstName().concat(" ").concat(user.getMiddleName() != null ? user.getMiddleName() : ""));
+			map.put("Gender", user.getGender().toString());
+			map.put("Mobile Number",user.getMobNo());
+			
+			if(acc.getMappedAreaIds()!=null) {
+				if(!acc.getMappedAreaIds().isEmpty()) {
+					map.put("Area", areaRepository.findByAreaIdIn(acc.getMappedAreaIds()).get(0).getAreaName());		
+				}
+			}
+			
+			
+			map.put("Designation", designationRepository.findById(acc.getAssignedDesignations().get(0).getDesignationIds()).getName());
+			map.put("Email", acc.getEmail());
+			map.put("Submitted On", 
+					user.getCreatedDate() != null ? new SimpleDateFormat("dd-MM-yyyy").format(user.getCreatedDate())
+							: new SimpleDateFormat("dd-MM-yyyy").format(new Date()));
+			map.put("status",user.getUserStatus().toString());
+			map.put("id", acc.getId());
+			map.put("isActive", acc.isEnabled());
+			tableMap.add(map);
+		}
+		}
+
+		AccountTableJSONModel model = new AccountTableJSONModel();
+		model.setTableColumn(tableColumn);
+		model.setTableData(tableMap);
+
+		return model;
+
+	}
+
+	@Override
+	public ResponseEntity<String> approvePartner(List<String> ids) {
+		// Approved users: enabled = true; expired = false; Locked = false
+		try {
+
+			List<Account> accs = customAccountRepository.findByIdIn(ids);
+			for (Account acc : accs) {
+				acc.setEnabled(true);
+				acc.setExpired(false);
+				acc.setLocked(false);
+
+				UserDetails user = (UserDetails) acc.getUserDetails();
+				user.setApprovedOn(new Date());
+				user.setApprovedBy(SecurityContextHolder.getContext().getAuthentication().getName());
+				user.setUserStatus(UserStatus.APPROVED);
+				customAccountRepository.save(acc);
+			}
+
+			return new ResponseEntity<String>(configurableEnvironment.getProperty("partner.approve.success"),
+					HttpStatus.OK);
+
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+
+	}
+
+	@Override
+	public ResponseEntity<String> rejectPartner(List<String> ids, List<RejectionModel> rejectionModel) {
+		// Rejected users: enabled = true; expired = true; Locked = false
+		Map<String, String> modelMap = rejectionModel.stream()
+				.collect(Collectors.toMap(RejectionModel::getId, RejectionModel::getRejectionMessage));
+
+		try {
+
+			List<Account> accs = customAccountRepository.findByIdIn(ids);
+
+			for (Account acc : accs) {
+
+				acc.setEnabled(true);
+				acc.setExpired(true);
+				acc.setLocked(false);
+
+				UserDetails user = (UserDetails) acc.getUserDetails();
+				user.setRejectedOn(new Date());
+				user.setRejectedBy(SecurityContextHolder.getContext().getAuthentication().getName());
+				user.setUserStatus(UserStatus.REJECTED);
+				// rejected messages
+				user.setRejectionMessage(modelMap.get(acc.getId()));
+				customAccountRepository.save(acc);
+			}
+
+			return new ResponseEntity<String>(configurableEnvironment.getProperty("partner.reject.success"),
+					HttpStatus.OK);
+
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	@Override
+	public List<UserApprovalModel> getUsersByRoleAndPartner(List<String> roleIds) {
+		
+		AssignedDesignations assignedDesignations = new AssignedDesignations();
+		assignedDesignations.setDesignationIds(roleIds.get(0));
+		assignedDesignations.setEnable(true);
+		
+		List<Account> accounts=customAccountRepository.getAssignedDesignations(Arrays.asList(assignedDesignations));
+		List<UserApprovalModel> tableMap = new ArrayList<>();
+		int i=1;
+		for (Account acc : accounts) {
+			UserDetails user = (UserDetails) acc.getUserDetails();
+			UserApprovalModel usr = new UserApprovalModel();
+			usr.setUserName(acc.getUserName());
+			usr.setName(user.getFirstName().concat(" ").concat(user.getMiddleName() != null ? user.getMiddleName() : ""));
+			usr.setGender(user.getGender().toString());
+			usr.setMobileNumber(user.getMobNo());
+			
+			if(acc.getMappedAreaIds()!=null) {
+				if(!acc.getMappedAreaIds().isEmpty()) {
+					usr.setAreaName(areaRepository.findByAreaIdIn(acc.getMappedAreaIds()).get(0).getAreaName());
+				}
+			}
+			usr.setEmail(acc.getEmail());
+			usr.setId(acc.getId());
+			if(!acc.isLocked() && acc.isEnabled() && !acc.isExpired()){
+				usr.setSlNo(i);
+				tableMap.add(usr);
+				i++;
+			}
+		}
+
+		return tableMap;
+
+	}
+
+}

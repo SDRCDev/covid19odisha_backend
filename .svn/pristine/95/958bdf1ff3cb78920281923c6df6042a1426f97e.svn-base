@@ -1,0 +1,21 @@
+package com.sdrc.covid19odisha.controllers;
+
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.sdrc.covid19odisha.services.TaskService;
+
+@RestController
+public class TaskAssignmentController {
+	
+	@Autowired
+	private TaskService taskService;
+	
+	public Map<String, Object> saveTask(Map<String, Object> data) {
+		taskService.saveTask(data);
+		data.put("status", "success");
+		return data;
+	}
+}

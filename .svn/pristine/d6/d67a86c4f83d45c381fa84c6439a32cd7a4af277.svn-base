@@ -1,0 +1,142 @@
+package com.sdrc.covid19odisha.services;
+
+import static org.springframework.data.mongodb.core.aggregation.ConditionalOperators.when;
+import static org.springframework.data.mongodb.core.query.Criteria.where;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.GroupOperation;
+import org.springframework.data.mongodb.core.aggregation.LookupOperation;
+import org.springframework.data.mongodb.core.aggregation.MatchOperation;
+import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
+import org.springframework.data.mongodb.core.aggregation.UnwindOperation;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.DashboardPanelOptions;
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.DashboardPanelRepository;
+import com.sdrc.covid19odisha.utils.DashboardSelection;
+
+@Service
+public class DashboardServiceImpl implements DashboardService {
+
+	@Autowired
+	private DashboardPanelRepository dpr;
+	
+	@Autowired
+	private MongoTemplate mongoTemplate;
+	
+	@Autowired
+	private AreaRepository areaRepo;
+	
+	@Override
+	public List<DashboardSelection> getDashboardSelectionPanel() {
+		// TODO Auto-generated method stub
+		List<DashboardSelection> dashboardPanels = new ArrayList<>();
+		List<DashboardPanelOptions> panelOptions = dpr.findAll();
+		List<DashboardPanelOptions> volOptions = new ArrayList<DashboardPanelOptions>();
+		List<DashboardPanelOptions> orgOptions = new ArrayList<DashboardPanelOptions>();
+		panelOptions.forEach(sub -> {
+			if(sub.getFormId() == 1)
+				volOptions.add(sub);
+			else
+				orgOptions.add(sub);
+		});
+		
+		DashboardSelection volPanel = new DashboardSelection();
+		volPanel.setLabel("Individual");
+		volPanel.setFormId(1);
+		volPanel.setOptions(volOptions);
+		dashboardPanels.add(volPanel);
+		
+		DashboardSelection orgPanel = new DashboardSelection();
+		orgPanel.setLabel("Institutional");
+		orgPanel.setFormId(2);
+		orgPanel.setOptions(orgOptions);
+		dashboardPanels.add(orgPanel);
+		
+		return dashboardPanels;
+	}
+
+	@Override
+	public Map<String, Map> getDashboardData(Integer formId, String path) {
+		// TODO Auto-generated method stub
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true)
+				.and("formId").is(1)
+				.and("data.deactivated").ne(true)
+				.and("data."+path).ne(null));
+		ProjectionOperation dataProject = Aggregation.project().and("data").as("data");
+		ProjectionOperation project1 = Aggregation.project().and("data.preferredDistrict").as("area")
+				.and(when(where("data."+path).ne(null)).then(1).otherwise(0)).as(path);
+		
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area").sum(path).as(path);
+		
+		LookupOperation lookup = Aggregation.lookup("area", "_id", "areaId", "area");
+		
+		UnwindOperation areaUnwind2 = Aggregation.unwind("area");
+		
+		ProjectionOperation project2 = Aggregation.project().and("area.areaId").as("areaId")
+				.and("area.areaName").as("areaName")
+				.and("area.areaCode").as("areaCode")
+				.and(path).as("value");
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, project1, areaUnwind, group, lookup, areaUnwind2, project2);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		Map<String, Map> newMap = new HashMap<>();
+		reportMap.forEach(map -> {
+			map.put("cssClass", "zeroslice");
+			newMap.put(String.valueOf(map.get("areaCode")), map);
+		});
+		return newMap;
+	}
+
+	@Override
+	public Map<String, List<?>> getBlockTableData(Integer formId, String path, Integer districtId) {
+		// TODO Auto-generated method stub
+		List<Integer> blockList = areaRepo.findByAreaLevelAreaLevelIdAndParentAreaId(4, districtId)
+				.stream().map(m -> m.getAreaId()).collect(Collectors.toList());
+		Map<String, List<?>> table = new HashMap<>();
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true)
+				.and("data.deactivated").ne(true)
+				.and("formId").is(1)
+				.and("data.areaLevel").is(2)
+				.and("data."+path).ne(null)
+				.and("data.preferredBlock").in(blockList));
+		ProjectionOperation dataProject = Aggregation.project().and("data").as("data");
+		ProjectionOperation project1 = Aggregation.project().and("data.preferredBlock").as("area")
+				.and(when(where("data."+path).ne(null)).then(1).otherwise(0)).as(path);
+		
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area").sum(path).as(path);
+		
+		LookupOperation lookup = Aggregation.lookup("area", "_id", "areaId", "area");
+		
+		UnwindOperation areaUnwind2 = Aggregation.unwind("area");
+		
+		ProjectionOperation project2 = Aggregation.project().and("area.areaId").as("areaId")
+				.and("area.areaName").as("areaName")
+				.and("area.areaCode").as("areaCode")
+				.and(path).as(path);
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, project1, areaUnwind, group, lookup, areaUnwind2, project2);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		
+		List<String> header = Arrays.asList("areaName", path);
+		table.put("tableColumn", header);
+		table.put("tableData", reportMap);
+		return table;
+	}
+}

@@ -1,0 +1,189 @@
+package com.sdrc.covid19odisha.services;
+
+import static org.springframework.data.mongodb.core.aggregation.ConditionalOperators.when;
+import static org.springframework.data.mongodb.core.query.Criteria.where;
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.GroupOperation;
+import org.springframework.data.mongodb.core.aggregation.LookupOperation;
+import org.springframework.data.mongodb.core.aggregation.MatchOperation;
+import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
+import org.springframework.data.mongodb.core.aggregation.UnwindOperation;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.models.FilterParams;
+
+@Service
+public class ReportServiceImpl implements ReportService {
+
+	@Autowired
+	private MongoTemplate mongoTemplate;
+	
+	@Override
+	public Map<String, List<?>> getQueryReportData(Integer userAreaLevel, Integer areaId) {
+		String areaLevel = "data.state";
+		String preferredArea = "data.preferredDistrict";
+		if(userAreaLevel==2) {
+			areaLevel = "data.state";
+			preferredArea = "data.preferredDistrict";
+		} else {
+			areaLevel = "data.preferredDistrict";
+			preferredArea = "data.preferredBlock";
+		}
+		
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true).and("formId").is(1).and(areaLevel).is(areaId));
+		
+		ProjectionOperation dataProject = Aggregation.project("data");
+		ProjectionOperation projection = Aggregation.project().and(preferredArea).as("area")
+				.and(when(where("data.awareness").ne(null)).then(1).otherwise(0)).as("awareness")
+				.and(when(where("data.fieldSupport").ne(null)).then(1).otherwise(0)).as("fieldSupport")
+				.and(when(where("data.essentials").ne(null)).then(1).otherwise(0)).as("essentials")
+				.and(when(where("data.health").ne(null)).then(1).otherwise(0)).as("health")
+				.and(when(where("data.reliefCampMgmt").ne(null)).then(1).otherwise(0)).as("reliefCampMgmt");
+		
+		UnwindOperation unwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area")
+				.sum("awareness").as("awareness")
+				.sum("fieldSupport").as("fieldSupport")
+				.sum("essentials").as("essentials")
+				.sum("health").as("health")
+				.sum("reliefCampMgmt").as("reliefCampMgmt");
+		
+		LookupOperation lookup = Aggregation.lookup("area", "_id", "areaId", "area");
+		
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		ProjectionOperation projectAll = Aggregation.project().and("area.areaName").as("area")
+				.and("awareness").as("awareness")
+				.and("fieldSupport").as("fieldSupport")
+				.and("essentials").as("essentials")
+				.and("health").as("health")
+				.and("reliefCampMgmt").as("reliefCampMgmt");
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, projection, unwind, group, lookup, areaUnwind, projectAll);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		List<String> header = Arrays.asList("area", "awareness","fieldSupport", "essentials", "health", "reliefCampMgmt");
+		Map<String, List<?>> reportTable = new HashMap<String, List<?>>();
+		reportTable.put("tableColumn", header);
+		reportTable.put("tableData", reportMap);
+		return reportTable;
+	}
+
+	@Override
+	public List<SubmissionData> getFilteredVolunteers(FilterParams params) {
+		// TODO Auto-generated method stub
+		/*Integer areaLevel = 1; 
+		List<Integer> districts= Arrays.asList(4,5,6,7); 
+		List<Integer> blocks = Arrays.asList(); 
+		List<Integer> gps = Arrays.asList();
+		List<Integer> genders = Arrays.asList(0); 
+		List<Integer> qualifications= Arrays.asList(4,6,7,8); 
+		List<Integer> workFrom= Arrays.asList(48); 
+		List<Integer> workTime= Arrays.asList(51,52); 
+		List<Integer> awareness= Arrays.asList(54,56);
+		List<Integer> fieldSupport= Arrays.asList(59,60);
+		List<Integer> essentials= Arrays.asList(64,65,66);
+		List<Integer> health= Arrays.asList(72,73);
+		List<Integer> reliefCampMgmt= Arrays.asList(86);*/
+		
+		Integer areaLevel = params.getAreaLevel(); 
+		List<Integer> districts= params.getDistricts(); 
+		List<Integer> blocks = params.getBlocks(); 
+		List<Integer> gps = params.getGps();
+		List<Integer> genders = params.getGenders(); 
+		List<Integer> qualifications= params.getQualifications(); 
+		List<Integer> workFrom= params.getWorkFrom(); 
+		List<Integer> workTime= params.getWorkTime(); 
+		List<Integer> awareness= params.getAwareness();
+		List<Integer> fieldSupport= params.getFieldSupport();
+		List<Integer> essentials= params.getEssentials();
+		List<Integer> health= params.getHealth();
+		List<Integer> reliefCampMgmt= params.getReliefCampMgmt();
+		
+		Query dynamicQuery = new Query();
+		Criteria commonCriteria = Criteria.where("formId").is(1).and("isVerified").is(true);
+		dynamicQuery.addCriteria(commonCriteria);
+		if(areaLevel !=null) {
+			Criteria areaLevelCriteria = Criteria.where("data.areaLevel").is(areaLevel);
+			dynamicQuery.addCriteria(areaLevelCriteria);
+		}
+		
+		if(districts !=null && districts.size()!=0) {
+			Criteria districtCriteria = Criteria.where("data.preferredDistrict").in(districts);
+			dynamicQuery.addCriteria(districtCriteria);
+		}
+		
+		if(blocks !=null && blocks.size()!=0) {
+			Criteria blockCriteria = Criteria.where("data.preferredBlock").in(blocks);
+			dynamicQuery.addCriteria(blockCriteria);
+		}
+		
+		if(gps !=null && gps.size()!=0) {
+			Criteria gpCriteria = Criteria.where("data.preferredGP").in(gps);
+			dynamicQuery.addCriteria(gpCriteria);
+		}
+		
+		if(genders !=null && genders.size()!=0) {
+			Criteria genderCriteria = Criteria.where("data.sex").in(genders);
+			dynamicQuery.addCriteria(genderCriteria);
+		}
+		
+		if(qualifications !=null && qualifications.size()!=0) {
+			Criteria qualificationsCriteria = Criteria.where("data.qualification").in(qualifications);
+			dynamicQuery.addCriteria(qualificationsCriteria);
+		}
+		
+		if(workFrom !=null && workFrom.size()!=0) {
+			Criteria workFromCriteria = Criteria.where("data.howVolunteer").in(workFrom);
+			dynamicQuery.addCriteria(workFromCriteria);
+		}
+		
+		if(workTime !=null && workTime.size()!=0) {
+			Criteria workTimeCriteria = Criteria.where("data.volunteerTime").in(workTime);
+			dynamicQuery.addCriteria(workTimeCriteria);
+		}
+		
+		if(awareness !=null && awareness.size()!=0) {
+			Criteria awarenessCriteria = Criteria.where("data.awareness").in(awareness);
+			dynamicQuery.addCriteria(awarenessCriteria);
+		}
+		
+		if(fieldSupport !=null && fieldSupport.size()!=0) {
+			Criteria fieldSupportCriteria = Criteria.where("data.fieldSupport").in(fieldSupport);
+			dynamicQuery.addCriteria(fieldSupportCriteria);
+		}
+		
+		if(essentials !=null && essentials.size()!=0) {
+			Criteria essentialsCriteria = Criteria.where("data.essentials").in(essentials);
+			dynamicQuery.addCriteria(essentialsCriteria);
+		}
+		
+		if(health !=null && health.size()!=0) {
+			Criteria healthCriteria = Criteria.where("data.health").in(health);
+			dynamicQuery.addCriteria(healthCriteria);
+		}
+		
+		if(reliefCampMgmt !=null && reliefCampMgmt.size()!=0) {
+			Criteria reliefCampMgmtCriteria = Criteria.where("data.reliefCampMgmt").in(reliefCampMgmt);
+			dynamicQuery.addCriteria(reliefCampMgmtCriteria);
+		}
+		
+		List<SubmissionData> filteredSubmissions = mongoTemplate.find(dynamicQuery, SubmissionData.class, "submissionData");
+		/*List<Map> _fsub = new ArrayList<>();
+		filteredSubmissions.forEach(s -> {
+			_fsub.add(s.getData());
+		});*/
+		return filteredSubmissions;
+	}
+}

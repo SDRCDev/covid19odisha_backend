@@ -1,0 +1,183 @@
+package com.sdrc.covid19odisha.services;
+
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.collections.Task;
+import com.sdrc.covid19odisha.models.FilterParams;
+import com.sdrc.covid19odisha.repositories.TaskRepository;
+
+@Service
+public class TaskServiceImpl implements TaskService {
+
+	@Autowired
+	private TaskRepository taskRepository;
+	
+	@Autowired
+	private MongoTemplate mongoTemplate;
+	
+	@Override
+	public void saveTask(Map<String, Object> data) {
+		// TODO Auto-generated method stub
+		Task task = new Task();
+		task.setCreatedDate(new Date());
+		task.setData(data);
+		taskRepository.save(task);
+	}
+	@Override
+	public Map<String, List<?>> getTaskList(String mobile) {
+		// TODO Auto-generated method stub
+	    SimpleDateFormat formatter = new SimpleDateFormat("dd/MM/yyyy");  
+	    
+		Map<String, List<?>> table = new HashMap<String, List<?>>();
+		List<String> header = Arrays.asList("Activity Type", "Activity Details","Coordinator Name", "Coordinator Mobile No.", "Assigned Date");
+		List<Map<String, Object>> tasks = new ArrayList<Map<String,Object>>();
+		taskRepository.getByMobileNumber(mobile).forEach(x-> {
+			Map<String, Object> taskMap = new HashMap<>();
+			taskMap.put("Activity Type", x.getData().get("task"));
+			taskMap.put("Activity Details", x.getData().get("details"));
+			taskMap.put("Coordinator Name", x.getData().get("contactPerson"));
+			taskMap.put("Coordinator Mobile No.", x.getData().get("contactPersonMobile"));
+			taskMap.put("Assigned Date", x.getCreatedDate()!=null?formatter.format(x.getCreatedDate()):"NA");
+			tasks.add(taskMap);
+		});
+		table.put("tableColumn", header);
+		table.put("tableData", tasks);
+		return table;
+	}
+
+	@Override
+	public Map<String, List<?>> getFilteredVolunteers(FilterParams params) {
+
+		Integer areaLevel = params.getAreaLevel(); 
+		List<Integer> districts= params.getDistricts(); 
+		List<Integer> blocks = params.getBlocks(); 
+		List<Integer> gps = params.getGps();
+		List<Integer> genders = params.getGenders(); 
+		List<Integer> qualifications= params.getQualifications(); 
+		List<Integer> vocationals = params.getVocationals();
+		List<Integer> professions = params.getProfessions();
+		List<Integer> workFrom= params.getWorkFrom(); 
+		List<Integer> workTime= params.getWorkTime(); 
+		List<Integer> awareness= params.getAwareness();
+		List<Integer> fieldSupport= params.getFieldSupport();
+		List<Integer> essentials= params.getEssentials();
+		List<Integer> health= params.getHealth();
+		List<Integer> reliefCampMgmt= params.getReliefCampMgmt();
+		
+		Query dynamicQuery = new Query();
+		Criteria commonCriteria = Criteria.where("formId").is(1).and("isVerified").is(true);
+		dynamicQuery.addCriteria(commonCriteria);
+		if(areaLevel !=null) {
+			Criteria areaLevelCriteria = Criteria.where("data.areaLevel").is(areaLevel);
+			dynamicQuery.addCriteria(areaLevelCriteria);
+		}
+		
+		if(districts !=null && districts.size()!=0) {
+			Criteria districtCriteria = Criteria.where("data.preferredDistrict").in(districts);
+			dynamicQuery.addCriteria(districtCriteria);
+		}
+		
+		if(blocks !=null && blocks.size()!=0) {
+			Criteria blockCriteria = Criteria.where("data.preferredBlock").in(blocks);
+			dynamicQuery.addCriteria(blockCriteria);
+		}
+		
+		if(gps !=null && gps.size()!=0) {
+			Criteria gpCriteria = Criteria.where("data.preferredGP").in(gps);
+			dynamicQuery.addCriteria(gpCriteria);
+		}
+		
+		if(genders !=null && genders.size()!=0) {
+			Criteria genderCriteria = Criteria.where("data.sex").in(genders);
+			dynamicQuery.addCriteria(genderCriteria);
+		}
+		
+		if(qualifications !=null && qualifications.size()!=0) {
+			Criteria qualificationsCriteria = Criteria.where("data.qualification").in(qualifications);
+			dynamicQuery.addCriteria(qualificationsCriteria);
+		}
+		
+		if(professions !=null && professions.size()!=0) {
+			Criteria professionsCriteria = Criteria.where("data.professions").in(professions);
+			dynamicQuery.addCriteria(professionsCriteria);
+		}
+		
+		if(vocationals !=null && vocationals.size()!=0) {
+			Criteria vocationalsCriteria = Criteria.where("data.vocational").in(vocationals);
+			dynamicQuery.addCriteria(vocationalsCriteria);
+		}
+		
+		if(workFrom !=null && workFrom.size()!=0) {
+			Criteria workFromCriteria = Criteria.where("data.howVolunteer").in(workFrom);
+			dynamicQuery.addCriteria(workFromCriteria);
+		}
+		
+		if(workTime !=null && workTime.size()!=0) {
+			Criteria workTimeCriteria = Criteria.where("data.volunteerTime").in(workTime);
+			dynamicQuery.addCriteria(workTimeCriteria);
+		}
+		
+		if(awareness !=null && awareness.size()!=0) {
+			Criteria awarenessCriteria = Criteria.where("data.awareness").in(awareness);
+			dynamicQuery.addCriteria(awarenessCriteria);
+		}
+		
+		if(fieldSupport !=null && fieldSupport.size()!=0) {
+			Criteria fieldSupportCriteria = Criteria.where("data.fieldSupport").in(fieldSupport);
+			dynamicQuery.addCriteria(fieldSupportCriteria);
+		}
+		
+		if(essentials !=null && essentials.size()!=0) {
+			Criteria essentialsCriteria = Criteria.where("data.essentials").in(essentials);
+			dynamicQuery.addCriteria(essentialsCriteria);
+		}
+		
+		if(health !=null && health.size()!=0) {
+			Criteria healthCriteria = Criteria.where("data.health").in(health);
+			dynamicQuery.addCriteria(healthCriteria);
+		}
+		
+		if(reliefCampMgmt !=null && reliefCampMgmt.size()!=0) {
+			Criteria reliefCampMgmtCriteria = Criteria.where("data.reliefCampMgmt").in(reliefCampMgmt);
+			dynamicQuery.addCriteria(reliefCampMgmtCriteria);
+		}
+		
+		List<SubmissionData> filteredSubmissions = mongoTemplate.find(dynamicQuery, SubmissionData.class, "submissionData");
+		List<Map<String, Object>> resp_object = new ArrayList<>();
+		List<String> headers = Arrays.asList("Name","Mobile","Preferred Activity");
+		Map<String, List<?>> resp = new HashMap<String, List<?>>();
+		filteredSubmissions.forEach(v -> {
+			Map<String, Object> volunteer = new HashMap<>();
+			String service = "";
+			service=v.getData().get("awareness")!=null?service+"Public awareness and Information,":service;
+			service=v.getData().get("fieldSupport")!=null?service+"On-field support,":service;
+			service=v.getData().get("essentials")!=null?service+"Essential services,":service;
+			service=v.getData().get("health")!=null?service+"Health,":service;
+			service=v.getData().get("reliefCampMgmt")!=null?service+"Relief Camp Management,":service;
+			
+			volunteer.put("Name", String.valueOf(v.getData().get("fullName")));
+			volunteer.put("Mobile", String.valueOf(v.getData().get("mobile")));
+			volunteer.put("Preferred Activity", service.length()>1?service.substring(0, service.length()-1):service);
+			
+			resp_object.add(volunteer);
+		});
+		
+		resp.put("tableColumn", headers);
+		resp.put("tableData", resp_object);
+		return resp;
+	
+	}
+}

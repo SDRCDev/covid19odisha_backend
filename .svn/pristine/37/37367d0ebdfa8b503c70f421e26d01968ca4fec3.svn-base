@@ -1,0 +1,13 @@
+package com.sdrc.covid19odisha.services;
+
+import java.util.List;
+import java.util.Map;
+
+import com.sdrc.covid19odisha.collections.Area;
+import com.sdrc.covid19odisha.collections.TypeDetail;
+
+public interface MasterDataApiService {
+	public List<Area> getAreaList(Integer areaLevelId, Integer parentAreaId);
+	
+	public Map<String, List<TypeDetail>> getOptions();
+}

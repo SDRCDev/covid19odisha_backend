@@ -1,0 +1,226 @@
+package com.sdrc.covid19odisha.services;
+
+import static org.springframework.data.mongodb.core.aggregation.ConditionalOperators.when;
+import static org.springframework.data.mongodb.core.query.Criteria.where;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.GroupOperation;
+import org.springframework.data.mongodb.core.aggregation.LookupOperation;
+import org.springframework.data.mongodb.core.aggregation.MatchOperation;
+import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
+import org.springframework.data.mongodb.core.aggregation.UnwindOperation;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.DashboardPanelOptions;
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.DashboardPanelRepository;
+import com.sdrc.covid19odisha.utils.DashboardSelection;
+
+@Service
+public class DashboardServiceImpl implements DashboardService {
+
+	@Autowired
+	private DashboardPanelRepository dpr;
+	
+	@Autowired
+	private MongoTemplate mongoTemplate;
+	
+	@Autowired
+	private AreaRepository areaRepo;
+	
+	@Override
+	public List<DashboardSelection> getDashboardSelectionPanel(Integer areaId) {
+		// TODO Auto-generated method stub
+		List<DashboardSelection> dashboardPanels = new ArrayList<>();
+		List<DashboardPanelOptions> panelOptions = dpr.findAll();
+		List<DashboardPanelOptions> volOptions = new ArrayList<DashboardPanelOptions>();
+		List<DashboardPanelOptions> orgOptions = new ArrayList<DashboardPanelOptions>();
+		Map orgPanelDataMap = getSidePanelWithOrgData(areaId);
+		Map volPanelDataMap = areaId!=null ? getAggregateData("data.preferredDistrict",areaId) : getAggregateData("data.state",2);
+		panelOptions.forEach(sub -> {
+			if(sub.getFormId() == 1) {
+				sub.setValue(volPanelDataMap!=null ? Double.parseDouble(String.valueOf(volPanelDataMap.get(sub.getPath()))) : 0);
+				volOptions.add(sub);
+			}
+			else {
+				sub.setValue(orgPanelDataMap!=null ? Double.parseDouble(String.valueOf(orgPanelDataMap.get(sub.getAggregatePath()))) : 0);
+				orgOptions.add(sub);
+			}
+		});
+		
+		DashboardSelection volPanel = new DashboardSelection();
+		volPanel.setLabel("Individual");
+		volPanel.setFormId(1);
+		volPanel.setOptions(volOptions);
+		dashboardPanels.add(volPanel);
+		
+		DashboardSelection orgPanel = new DashboardSelection();
+		orgPanel.setLabel("Institutional");
+		orgPanel.setFormId(2);
+		orgPanel.setOptions(orgOptions);
+		dashboardPanels.add(orgPanel);
+		
+		return dashboardPanels;
+	}
+	
+	private Map getSidePanelWithOrgData(Integer areaId){
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true)
+				.and("data.deactivated").ne(true));
+		
+		ProjectionOperation dataProject = Aggregation.project("data");
+		ProjectionOperation project1 = null;
+		if(areaId != null)
+			project1 = Aggregation.project().and("data.preferredDistrict").as("area")
+					.and(when(where("data.formId").is(2)).then(1).otherwise(0)).as("orgTotal")
+					.and(when(where("data.serviceType").is(98)).then(1).otherwise(0)).as("professionalServices")
+					.and(when(where("data.serviceType").is(99)).then(1).otherwise(0)).as("researchSupport")
+					.and(when(where("data.serviceType").is(100)).then(1).otherwise(0)).as("equipments")
+					.and(when(where("data.serviceType").is(101)).then(1).otherwise(0)).as("products");
+		else
+			project1 = Aggregation.project().and("data.state").as("area")
+					.and(when(where("data.formId").is(2)).then(1).otherwise(0)).as("orgTotal")
+					.and(when(where("data.serviceType").is(98)).then(1).otherwise(0)).as("professionalServices")
+					.and(when(where("data.serviceType").is(99)).then(1).otherwise(0)).as("researchSupport")
+					.and(when(where("data.serviceType").is(100)).then(1).otherwise(0)).as("equipments")
+					.and(when(where("data.serviceType").is(101)).then(1).otherwise(0)).as("products");
+		
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		MatchOperation areamatch = null;
+		if(areaId != null)
+			areamatch = Aggregation.match(Criteria.where("area").is(areaId));
+		else
+			areamatch = Aggregation.match(Criteria.where("area").ne(null));
+		
+		GroupOperation group = Aggregation.group("area")
+				.sum("orgTotal").as("orgTotal")
+				.sum("professionalServices").as("professionalServices")
+				.sum("researchSupport").as("researchSupport")
+				.sum("equipments").as("equipments")
+				.sum("products").as("products");
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, project1, areaUnwind, areamatch, group);
+		
+		List<Map> panelDataMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		
+		return panelDataMap.size()>0 ? panelDataMap.get(0) : null;
+	}
+	
+	private Map getAggregateData(String areaPath,Integer areaId) {
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true).and("formId").is(1)
+				.and("data.deactivated").ne(true).and(areaPath).is(areaId));
+		
+		ProjectionOperation dataProject = Aggregation.project("data");
+		
+		ProjectionOperation projection = null;
+		projection = Aggregation.project().and(areaPath).as("area")
+				.and(when(where("data.formId").ne(null)).then(1).otherwise(0)).as("total")
+				.and(when(where("data.awareness").ne(null)).then(1).otherwise(0)).as("awareness")
+				.and(when(where("data.fieldSupport").ne(null)).then(1).otherwise(0)).as("fieldSupport")
+				.and(when(where("data.essentials").ne(null)).then(1).otherwise(0)).as("essentials")
+				.and(when(where("data.health").ne(null)).then(1).otherwise(0)).as("health")
+				.and(when(where("data.reliefCampMgmt").ne(null)).then(1).otherwise(0)).as("reliefCampMgmt");
+		
+		UnwindOperation unwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area")
+				.sum("total").as("total")
+				.sum("awareness").as("awareness")
+				.sum("fieldSupport").as("fieldSupport")
+				.sum("essentials").as("essentials")
+				.sum("health").as("health")
+				.sum("reliefCampMgmt").as("reliefCampMgmt");
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, projection, unwind, group);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		
+		return reportMap.size()>0 ? reportMap.get(0) : null;
+	}
+
+	@Override
+	public Map<String, Map> getDashboardData(Integer formId, String path, Integer typeDetailId) {
+		// TODO Auto-generated method stub
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true)
+				.and("data.deactivated").ne(true)
+				.and("data."+path).ne(null));
+		ProjectionOperation dataProject = Aggregation.project().and("data").as("data");
+		
+		ProjectionOperation project1 = null;
+		if(formId == 1)
+			project1 = Aggregation.project().and("data.preferredDistrict").as("area")
+					.and(when(where("data."+path).ne(null)).then(1).otherwise(0)).as(path);
+		else
+			project1 = Aggregation.project().and("data.preferredDistrict").as("area")
+					.and(when(where("data."+path).is(typeDetailId)).then(1).otherwise(0)).as(path);
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area").sum(path).as(path);
+		
+		LookupOperation lookup = Aggregation.lookup("area", "_id", "areaId", "area");
+		
+		UnwindOperation areaUnwind2 = Aggregation.unwind("area");
+		
+		ProjectionOperation project2 = Aggregation.project().and("area.areaId").as("areaId")
+				.and("area.areaName").as("areaName")
+				.and("area.areaCode").as("areaCode")
+				.and(path).as("value");
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, project1, areaUnwind, group, lookup, areaUnwind2, project2);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		Map<String, Map> newMap = new HashMap<>();
+		reportMap.forEach(map -> {
+			map.put("cssClass", "zeroslice");
+			newMap.put(String.valueOf(map.get("areaCode")), map);
+		});
+		return newMap;
+	}
+
+	@Override
+	public Map<String, List<?>> getBlockTableData(Integer formId, String path, Integer districtId) {
+		// TODO Auto-generated method stub
+		List<Integer> blockList = areaRepo.findByAreaLevelAreaLevelIdAndParentAreaId(4, districtId)
+				.stream().map(m -> m.getAreaId()).collect(Collectors.toList());
+		Map<String, List<?>> table = new HashMap<>();
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true)
+				.and("data.deactivated").ne(true)
+				.and("formId").is(1)
+				.and("data.areaLevel").is(2)
+				.and("data."+path).ne(null)
+				.and("data.preferredBlock").in(blockList));
+		ProjectionOperation dataProject = Aggregation.project().and("data").as("data");
+		ProjectionOperation project1 = Aggregation.project().and("data.preferredBlock").as("area")
+				.and(when(where("data."+path).ne(null)).then(1).otherwise(0)).as(path);
+		
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area").sum(path).as(path);
+		
+		LookupOperation lookup = Aggregation.lookup("area", "_id", "areaId", "area");
+		
+		UnwindOperation areaUnwind2 = Aggregation.unwind("area");
+		
+		ProjectionOperation project2 = Aggregation.project().and("area.areaId").as("areaId")
+				.and("area.areaName").as("areaName")
+				.and("area.areaCode").as("areaCode")
+				.and(path).as(path);
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, project1, areaUnwind, group, lookup, areaUnwind2, project2);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		
+		List<String> header = Arrays.asList("areaName", path);
+		table.put("tableColumn", header);
+		table.put("tableData", reportMap);
+		return table;
+	}
+}

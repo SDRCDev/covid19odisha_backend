@@ -1,0 +1,55 @@
+#server.port=8080
+#server.context-path=/covid19odisha
+
+##mongo db prop
+#spring.data.mongodb.host=192.168.1.10
+#spring.data.mongodb.database=covid19odisha
+#spring.data.mongodb.port=27017
+
+
+#spring.data.mongodb.authentication-database=admin
+#spring.data.mongodb.username=biswa380
+#spring.data.mongodb.password=biswa380
+
+msg.url.and.credential=http://msg2all.com/TRANSAPI/sendsms.jsp?login=kusodi&passwd=
+password=kusodi@321
+version=&version=v1.0&msisdn=
+msg.type=&msg_type=text&msg=
+sender.id=&sender_id=COVIDO
+callback.url=&callback_url=http://msg2all.com/TRANSLOG
+
+# ====================================================User mgmt===========================================================
+project.name=covid19
+
+datacollection.dbtype=nosql
+
+#sending email userid and password
+authentication.userid=sirmncha@gmail.com
+authentication.password=sirmncha@123#!
+
+#mention the type of security->
+application.security.type=jwt-both
+app.datasource.type=MONGO
+resource.server.resourceid=web-service
+
+##JWT TOKEN INITIALIZER
+jwt.jks.password=sdrc@123#!
+jwt.jks.alias=appname
+
+
+security.allow.path=/,/bypass/**,/uploadProfileImage,/area,/multiArea,/options,/saveSubmission,/validateOTP,/resendOTP,/downloadCmsDoc,/getpartnerAvailable,/getAllApprovedGalleryImage,/getAllArea,/getEmailVarificationCode,/getEmailOTPAvailability,/saveSucessStories,/getAllApprovedResources,/uploadFile,/api/importPartnerDetails,/api/importQuestions,/downloadImage,/getAllSuccessStories,/getSuccessStoriesDetails,/api/submissionImage,/getAllApprovedWhatsNew,/getAllApprovedGallery,/getAllApprovedImportantLinks,/getAllApprovedResource,/getResourceDetails,/getGalleryDetails,/getWhatsNewDetails,/downloadFile,/getSuccessStoriesDetails,/getAllApprovedSuccessStories,/exportGroupIndicator,/getAllRoles,/getAllUser,/approveUser,/rejectUser,/getUsersByRole,/getAllResources,/resourceUploadFile,/downloadCmsDoc,/updateOption,/api/getIndicatorValue
+
+
+allow.admin.creation=false
+#logginig level
+logging.level.org.springframework.data.mongodb.repository.Query=INFO
+
+sdrc.security.disable.createuser.endpoints=true
+sdrc.security.disable.updateUser.endpoint=true
+
+spring.http.multipart.max-file-size=500MB
+spring.http.multipart.max-request-size=500MB
+
+
+sdrc.security.disable.frameOptions=true
+volunteer.registration.imagepath = C:/covid19odisha/

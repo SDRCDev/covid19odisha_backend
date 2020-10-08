@@ -1,0 +1,25 @@
+server.port=8080
+server.context-path=/covid19odisha
+
+##mongo db prop
+spring.data.mongodb.host=192.168.1.10
+spring.data.mongodb.database=covid19odisha
+spring.data.mongodb.port=27017
+
+spring.data.mongodb.authentication-database=admin
+spring.data.mongodb.username=admin
+spring.data.mongodb.password=sdrc@mongo6356
+
+#CMS Config
+cms.file.path=C:/COVID19/
+
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=techsupport@sdrc.co.in
+spring.mail.password=pass@123
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+
+gallery.image.filepath=https://testserver.sdrc.co.in:8443/covid19odisha/downloadCmsDoc?fileName=
+
+report.path=C:/COVID19/Report/

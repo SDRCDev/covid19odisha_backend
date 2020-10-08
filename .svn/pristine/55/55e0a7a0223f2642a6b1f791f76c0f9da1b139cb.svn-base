@@ -1,0 +1,15 @@
+package com.sdrc.covid19odisha.services;
+
+import java.util.List;
+import java.util.Map;
+
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.models.FilterParams;
+
+public interface ReportService {
+
+	Map<String, List<?>> getQueryReportData(Integer userAreaLevel, Integer areaId);
+	
+	public List<SubmissionData> getFilteredVolunteers(FilterParams params);
+
+}

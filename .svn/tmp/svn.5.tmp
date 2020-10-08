@@ -1,0 +1,475 @@
+package com.sdrc.covid19odisha.services;
+
+import static org.springframework.data.mongodb.core.aggregation.ConditionalOperators.when;
+import static org.springframework.data.mongodb.core.query.Criteria.where;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.sdrc.usermgmt.mongodb.domain.Account;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.GroupOperation;
+import org.springframework.data.mongodb.core.aggregation.LookupOperation;
+import org.springframework.data.mongodb.core.aggregation.MatchOperation;
+import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
+import org.springframework.data.mongodb.core.aggregation.UnwindOperation;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.Area;
+import com.sdrc.covid19odisha.collections.Question;
+import com.sdrc.covid19odisha.collections.SubmissionData;
+import com.sdrc.covid19odisha.collections.Type;
+import com.sdrc.covid19odisha.collections.TypeDetail;
+import com.sdrc.covid19odisha.models.FilterParams;
+import com.sdrc.covid19odisha.models.UserDetails;
+import com.sdrc.covid19odisha.repositories.AreaRepository;
+import com.sdrc.covid19odisha.repositories.CustomAccountRepository;
+import com.sdrc.covid19odisha.repositories.QuestionRepository;
+import com.sdrc.covid19odisha.repositories.TypeDetailRepository;
+import com.sdrc.covid19odisha.repositories.TypeRepository;
+import com.sdrc.covid19odisha.utils.ExcelStyleSheet;
+
+@Service
+public class ReportServiceImpl implements ReportService {
+
+	@Autowired
+	private MongoTemplate mongoTemplate;
+	
+	@Autowired
+	private QuestionRepository  questionRepository;
+	
+	@Autowired
+	private TypeDetailRepository typeDetailRepository;
+
+	@Autowired
+	private AreaRepository areaRepository;
+	
+	@Autowired
+	private ConfigurableEnvironment configurableEnvironment;
+	
+	@Autowired
+	private TypeRepository typeRepository;
+	
+	@Autowired
+	@Qualifier("customAccountRepository")
+	private CustomAccountRepository customAccountRepository;
+	
+	
+	@Override
+	public Map<String, List<?>> getQueryReportData() {
+		
+		Account acc = customAccountRepository
+				.findByUserName(SecurityContextHolder.getContext().getAuthentication().getName());
+		UserDetails user = acc!=null?(UserDetails) acc.getUserDetails():null;
+		
+		String areaLevel = "data.state";
+		String preferredArea = "data.preferredDistrict";
+		Integer areaId = 2;
+		if(user!=null && user.getAreaId().contains(2)) {
+			areaLevel = "data.state";
+			preferredArea = "data.preferredDistrict";
+			areaId = user.getAreaId().get(0);
+		} else if(user!=null){
+			areaLevel = "data.preferredDistrict";
+			preferredArea = "data.preferredBlock";
+			areaId = user.getAreaId().get(0);
+		}
+		
+		MatchOperation match = Aggregation.match(Criteria.where("isVerified").is(true).and("formId").is(1).and(areaLevel).is(areaId));
+		
+		ProjectionOperation dataProject = Aggregation.project("data");
+		ProjectionOperation projection = Aggregation.project().and(preferredArea).as("area")
+				.and(when(where("data.awareness").ne(null)).then(1).otherwise(0)).as("awareness")
+				.and(when(where("data.fieldSupport").ne(null)).then(1).otherwise(0)).as("fieldSupport")
+				.and(when(where("data.essentials").ne(null)).then(1).otherwise(0)).as("essentials")
+				.and(when(where("data.health").ne(null)).then(1).otherwise(0)).as("health")
+				.and(when(where("data.reliefCampMgmt").ne(null)).then(1).otherwise(0)).as("reliefCampMgmt");
+		
+		UnwindOperation unwind = Aggregation.unwind("area");
+		
+		GroupOperation group = Aggregation.group("area")
+				.sum("awareness").as("awareness")
+				.sum("fieldSupport").as("fieldSupport")
+				.sum("essentials").as("essentials")
+				.sum("health").as("health")
+				.sum("reliefCampMgmt").as("reliefCampMgmt");
+		
+		LookupOperation lookup = Aggregation.lookup("area", "_id", "areaId", "area");
+		
+		UnwindOperation areaUnwind = Aggregation.unwind("area");
+		
+		ProjectionOperation projectAll = Aggregation.project().and("area.areaName").as("area")
+				.and("area.parentAreaId").as("parentAreaId")
+				.and("awareness").as("awareness")
+				.and("fieldSupport").as("fieldSupport")
+				.and("essentials").as("essentials")
+				.and("health").as("health")
+				.and("reliefCampMgmt").as("reliefCampMgmt");
+		
+		LookupOperation parentAreaLookup = Aggregation.lookup("area", "parentAreaId", "areaId", "parentArea");
+		
+		UnwindOperation parentAreaUnwind = Aggregation.unwind("parentArea");
+		
+		ProjectionOperation projectParentArea = Aggregation.project().and("area").as("area")
+				.and("parentArea.areaName").as("parentArea")
+				.and("awareness").as("awareness")
+				.and("fieldSupport").as("fieldSupport")
+				.and("essentials").as("essentials")
+				.and("health").as("health")
+				.and("reliefCampMgmt").as("reliefCampMgmt");
+		
+		Aggregation resultQuery=Aggregation.newAggregation(match, dataProject, projection, unwind, group, lookup, areaUnwind, projectAll, 
+				parentAreaLookup, parentAreaUnwind, projectParentArea);
+		List<Map> reportMap = mongoTemplate.aggregate(resultQuery, SubmissionData.class, Map.class).getMappedResults();
+		List<String> header = Arrays.asList("area", "awareness","fieldSupport", "essentials", "health", "reliefCampMgmt");
+		Map<String, List<?>> reportTable = new HashMap<String, List<?>>();
+		reportTable.put("tableColumn", header);
+		reportTable.put("tableData", reportMap);
+		return reportTable;
+	}
+
+	@Override
+	public ResponseEntity<String> getFilteredVolunteers(FilterParams params)  throws Exception {
+		// TODO Auto-generated method stub
+		/*Integer areaLevel = 1; 
+		List<Integer> districts= Arrays.asList(4,5,6,7); 
+		List<Integer> blocks = Arrays.asList(); 
+		List<Integer> gps = Arrays.asList();
+		List<Integer> genders = Arrays.asList(0); 
+		List<Integer> qualifications= Arrays.asList(4,6,7,8); 
+		List<Integer> workFrom= Arrays.asList(48); 
+		List<Integer> workTime= Arrays.asList(51,52); 
+		List<Integer> awareness= Arrays.asList(54,56);
+		List<Integer> fieldSupport= Arrays.asList(59,60);
+		List<Integer> essentials= Arrays.asList(64,65,66);
+		List<Integer> health= Arrays.asList(72,73);
+		List<Integer> reliefCampMgmt= Arrays.asList(86);*/
+		
+		Integer areaLevel = params.getAreaLevel(); 
+		List<Integer> districts= params.getDistricts(); 
+		List<Integer> blocks = params.getBlocks(); 
+		List<Integer> gps = params.getGps();
+		List<Integer> genders = params.getGenders(); 
+		List<Integer> qualifications= params.getQualifications(); 
+		List<Integer> vocationals = params.getVocationals();
+		List<Integer> professions = params.getProfessions();
+		List<Integer> availability = params.getAvailability();
+		List<Integer> workFrom= params.getWorkFrom(); 
+		List<Integer> workTime= params.getWorkTime(); 
+		List<Integer> awareness= params.getAwareness();
+		List<Integer> fieldSupport= params.getFieldSupport();
+		List<Integer> essentials= params.getEssentials();
+		List<Integer> health= params.getHealth();
+		List<Integer> reliefCampMgmt= params.getReliefCampMgmt();
+		
+		Account acc = customAccountRepository
+				.findByUserName(SecurityContextHolder.getContext().getAuthentication().getName());
+		UserDetails user = acc!=null?(UserDetails) acc.getUserDetails():null;
+		
+		if(user!=null && !user.getAreaId().contains(2)) {
+			districts = user.getAreaId();
+//			districts = Arrays.asList(13);
+		} 
+		
+		Query dynamicQuery = new Query();
+		Criteria commonCriteria = Criteria.where("formId").is(1).and("isVerified").is(true);
+		dynamicQuery.addCriteria(commonCriteria);
+		if(areaLevel !=null) {
+			Criteria areaLevelCriteria = Criteria.where("data.areaLevel").is(areaLevel);
+			dynamicQuery.addCriteria(areaLevelCriteria);
+		}
+		
+		if(districts !=null && districts.size()!=0) {
+			Criteria districtCriteria = Criteria.where("data.preferredDistrict").in(districts);
+			dynamicQuery.addCriteria(districtCriteria);
+		}
+		
+		if(blocks !=null && blocks.size()!=0) {
+			Criteria blockCriteria = Criteria.where("data.preferredBlock").in(blocks);
+			dynamicQuery.addCriteria(blockCriteria);
+		}
+		
+		if(gps !=null && gps.size()!=0) {
+			Criteria gpCriteria = Criteria.where("data.preferredGP").in(gps);
+			dynamicQuery.addCriteria(gpCriteria);
+		}
+		
+		if(genders !=null && genders.size()!=0) {
+			Criteria genderCriteria = Criteria.where("data.sex").in(genders);
+			dynamicQuery.addCriteria(genderCriteria);
+		}
+		
+		if(qualifications !=null && qualifications.size()!=0) {
+			Criteria qualificationsCriteria = Criteria.where("data.qualification").in(qualifications);
+			dynamicQuery.addCriteria(qualificationsCriteria);
+		}
+		
+		if(professions !=null && professions.size()!=0) {
+			Criteria professionsCriteria = Criteria.where("data.specification").in(professions);
+			dynamicQuery.addCriteria(professionsCriteria);
+		}
+		
+		if(vocationals !=null && vocationals.size()!=0) {
+			Criteria vocationalsCriteria = Criteria.where("data.vocational").in(vocationals);
+			dynamicQuery.addCriteria(vocationalsCriteria);
+		}
+		
+		if(availability !=null && availability.size()!=0) {
+			Criteria availabilityCriteria = Criteria.where("data.availability").in(availability);
+			dynamicQuery.addCriteria(availabilityCriteria);
+		}
+		
+		if(workFrom !=null && workFrom.size()!=0) {
+			Criteria workFromCriteria = Criteria.where("data.howVolunteer").in(workFrom);
+			dynamicQuery.addCriteria(workFromCriteria);
+		}
+		
+		if(workTime !=null && workTime.size()!=0) {
+			Criteria workTimeCriteria = Criteria.where("data.volunteerTime").in(workTime);
+			dynamicQuery.addCriteria(workTimeCriteria);
+		}
+		
+		if(awareness !=null && awareness.size()!=0) {
+			Criteria awarenessCriteria = Criteria.where("data.awareness").in(awareness);
+			dynamicQuery.addCriteria(awarenessCriteria);
+		}
+		
+		if(fieldSupport !=null && fieldSupport.size()!=0) {
+			Criteria fieldSupportCriteria = Criteria.where("data.fieldSupport").in(fieldSupport);
+			dynamicQuery.addCriteria(fieldSupportCriteria);
+		}
+		
+		if(essentials !=null && essentials.size()!=0) {
+			Criteria essentialsCriteria = Criteria.where("data.essentials").in(essentials);
+			dynamicQuery.addCriteria(essentialsCriteria);
+		}
+		
+		if(health !=null && health.size()!=0) {
+			Criteria healthCriteria = Criteria.where("data.health").in(health);
+			dynamicQuery.addCriteria(healthCriteria);
+		}
+		
+		if(reliefCampMgmt !=null && reliefCampMgmt.size()!=0) {
+			Criteria reliefCampMgmtCriteria = Criteria.where("data.reliefCampMgmt").in(reliefCampMgmt);
+			dynamicQuery.addCriteria(reliefCampMgmtCriteria);
+		}
+		
+		List<SubmissionData> filteredSubmissions = mongoTemplate.find(dynamicQuery, SubmissionData.class, "submissionData");
+		
+		return generateQueryBasedExcel(1,filteredSubmissions) ;
+	}
+
+	private ResponseEntity<String> generateQueryBasedExcel(int formId, List<SubmissionData> filteredSubmissions) throws IOException {
+		
+		if(filteredSubmissions!=null) {
+
+		List<TypeDetail> typeDetailList = typeDetailRepository.findAll();
+		Map<Integer, TypeDetail> typeDetailMap = typeDetailList.stream()
+				.collect(Collectors.toMap(TypeDetail::getSlugId, typeDe -> typeDe));
+		
+		List<Type> typeList = typeRepository.findAll();
+		Map<String, Type> typeMap = typeList.stream()
+				.collect(Collectors.toMap(Type::getTypeName, typeDe -> typeDe));
+		/**
+		 * get all Area(only areaid and areaname)
+		 */
+		List<Area> areaList = areaRepository.findAll();
+
+		Map<Integer, String> areaMap = areaList.stream().collect(Collectors.toMap(Area::getAreaId, Area::getAreaName));
+		
+		Map<Integer, String> areaLevelMap = new HashMap<Integer, String>();
+		areaLevelMap.put(1, "District Level");
+		areaLevelMap.put(2, "Block Level");
+		areaLevelMap.put(3, "Gram Panchayat Level");
+		Question question = questionRepository.findByFormId(formId);
+		
+		XSSFWorkbook workbook = new XSSFWorkbook();
+		XSSFSheet sheet = workbook.createSheet("Data");
+		XSSFCellStyle cellstyleMiddle = ExcelStyleSheet.getStyleForLeftMiddle(workbook);
+		int rowNum = 1;
+		int questionCellCount = 0;
+		Row row = sheet.createRow(rowNum);
+		Row subrow = sheet.createRow(++rowNum);
+		Row hideRow = sheet.createRow(++rowNum);
+		
+		List<Map<String,Object>> listOfQusetionMap = question.getQuestions();
+		
+		
+		for (Map<String,Object> questionMap : listOfQusetionMap) {
+			String hideCellValue = null;
+			if(questionMap.get("TypeName")!=null) {
+				hideCellValue=questionMap.get("SubmissionKey")+"#"+questionMap.get("QuestionType")+"#"+questionMap.get("TypeName");
+			}else {
+				hideCellValue=questionMap.get("SubmissionKey")+"#"+questionMap.get("QuestionType");
+			}
+			
+			if(!questionMap.get("QuestionType").toString().equals("selectMultiple")) {
+				Cell cell1= subrow.createCell(questionCellCount);
+				sheet.addMergedRegion(new CellRangeAddress(1, 2, questionCellCount, questionCellCount));
+			Cell cell2=row.createCell(questionCellCount);//
+			cell2.setCellValue(questionMap.get("Question").toString());
+			cell2.setCellStyle( cellstyleMiddle);
+			cell1.setCellStyle( cellstyleMiddle);
+			//row.createCell(questionCellCount).setCellValue(questionMap.get("Question").toString());
+			hideRow.createCell(questionCellCount).setCellValue(hideCellValue);
+			}else {
+				if(questionMap.get("TypeName")!=null) {
+					List<TypeDetail> listOfTypeDetails = typeDetailRepository.findByTypeId(typeMap.get(questionMap.get("TypeName")).getSlugId());
+					//System.out.println(listOfTypeDetails.size());
+					int oldquestionCellCount=questionCellCount;
+					int subQuestionCellCount=questionCellCount;
+					sheet.addMergedRegion(new CellRangeAddress(1, 1, questionCellCount, (questionCellCount+listOfTypeDetails.size()-1)));
+					Cell cell3 = row.createCell(questionCellCount);
+					cell3.setCellValue(questionMap.get("Question").toString());
+					cell3.setCellStyle( cellstyleMiddle);
+					
+					for (TypeDetail type : listOfTypeDetails) {
+						Cell cell4 = subrow.createCell(subQuestionCellCount);
+						cell4.setCellValue(type.getName());
+						cell4.setCellStyle( cellstyleMiddle);
+						sheet.autoSizeColumn(subQuestionCellCount);
+						hideRow.createCell(subQuestionCellCount).setCellValue(hideCellValue+"#"+type.getSlugId());
+						subQuestionCellCount++;
+					}
+					
+					questionCellCount=oldquestionCellCount+listOfTypeDetails.size()-1;
+					
+				}
+			}
+			 sheet.autoSizeColumn(questionCellCount);
+			 
+			 
+			 questionCellCount++;
+		}
+		
+		
+		Row dataRow = null;
+		Row keyRow = sheet.getRow(3);
+		List<Map<String,Object>> submissionDataMap=new ArrayList<>();
+		
+		for (SubmissionData submissionData : filteredSubmissions) {
+			dataRow  = sheet.createRow(++rowNum);
+			int cellCount = 0;
+			for (Cell cell : keyRow) {
+				
+				//System.out.println(cell.getStringCellValue());
+				/*for (Map.Entry<String,Object> entry : submissionData.getData().entrySet()) {
+					if(cell.getStringCellValue().split("#")[0].equals(entry.getKey())) {
+						dataRow.createCell(cellCount).setCellValue(entry.getValue().toString());
+					}
+				}*/
+				if(cell.getStringCellValue().split("#")[1].equals("text")) {
+				dataRow.createCell(cellCount).setCellValue(submissionData.getData().get(cell.getStringCellValue().split("#")[0])==null?"":submissionData.getData().get(cell.getStringCellValue().split("#")[0]).toString());
+				}else if(cell.getStringCellValue().split("#")[1].equals("selectOne")) {
+					if(cell.getStringCellValue().split("#")[2].equals("areaLevel")) {
+					dataRow.createCell(cellCount).setCellValue(submissionData.getData().get(cell.getStringCellValue().split("#")[0])==null?"":areaLevelMap.get(Integer.parseInt(submissionData.getData().get(cell.getStringCellValue().split("#")[0]).toString())));
+					}else if(cell.getStringCellValue().split("#")[2].equals("area")) {
+						if(submissionData.getData().get(cell.getStringCellValue().split("#")[0]) instanceof List<?>) {
+							//System.out.println("List= "+submissionData.getData().get(cell.getStringCellValue().split("#")[0]));
+							StringBuilder areaName =new StringBuilder("");
+							List<Integer> areaIds = (List<Integer>) submissionData.getData().get(cell.getStringCellValue().split("#")[0]);
+							for (Integer areaId : areaIds) {
+								areaName.append(areaMap.get(areaId)+", ");
+							}
+							dataRow.createCell(cellCount).setCellValue(submissionData.getData().get(cell.getStringCellValue().split("#")[0])==null?"":areaName.toString());
+						}else {
+							//System.out.println("Single= "+submissionData.getData().get(cell.getStringCellValue().split("#")[0]));
+							dataRow.createCell(cellCount).setCellValue(submissionData.getData().get(cell.getStringCellValue().split("#")[0])==null?"":areaMap.get(Integer.parseInt(submissionData.getData().get(cell.getStringCellValue().split("#")[0]).toString())));
+						}
+					}else {
+						dataRow.createCell(cellCount).setCellValue(submissionData.getData().get(cell.getStringCellValue().split("#")[0])==null?"":typeDetailMap.get(Integer.parseInt(submissionData.getData().get(cell.getStringCellValue().split("#")[0]).toString())).getName());
+					}
+					
+				}else if(cell.getStringCellValue().split("#")[1].equals("selectMultiple")) {
+					List<Integer> multiValue=(List<Integer>) submissionData.getData().get(cell.getStringCellValue().split("#")[0]);
+					System.out.println(Integer.parseInt(cell.getStringCellValue().split("#")[3]));
+					if(multiValue==null) {
+						dataRow.createCell(cellCount).setCellValue("");
+				}else{if(multiValue.contains(Integer.parseInt(cell.getStringCellValue().split("#")[3]))) {
+						//System.out.println(Integer.parseInt(cell.getStringCellValue().split("#")[3]));
+						//dataRow.createCell(cellCount).setCellValue(submissionData.getData().get(cell.getStringCellValue().split("#")[0])==null?"N/A":typeDetailMap.get(Integer.parseInt(cell.getStringCellValue().split("#")[3])).getName());
+						dataRow.createCell(cellCount).setCellValue("YES");
+					}else {
+						dataRow.createCell(cellCount).setCellValue("NO");
+					}
+					}
+					
+				}
+				++cellCount;
+			}
+			
+			
+		}
+		
+		
+		
+		
+		removeRow(sheet,3);
+		String dir = configurableEnvironment.getProperty("report.path");
+		File file = new File(dir);
+
+		/*
+		 * make directory if doesn't exist
+		 */
+		if (!file.exists())
+			file.mkdirs();
+		String formName=null;
+		if(formId==1) {
+			formName="volunteer_";
+		}else {
+			formName="organizational_";
+		}
+
+		String name = "Covid19_" +formName
+				+ new SimpleDateFormat("ddMMyyyyHHmmss").format(new Date()) + ".xlsx";
+		String path = dir + "" + name;
+
+		FileOutputStream fos = new FileOutputStream(new File(path));
+		workbook.write(fos);
+		fos.close();
+		workbook.close();
+		return new ResponseEntity<String>(path, HttpStatus.OK);
+		}else {
+			return new ResponseEntity<String>("nodata", HttpStatus.OK);
+		}
+		
+	}
+
+	private void removeRow(XSSFSheet sheet, int rowIndex) {
+	    int lastRowNum = sheet.getLastRowNum();
+	    if (rowIndex >= 0 && rowIndex < lastRowNum) {
+	        sheet.shiftRows(rowIndex + 1, lastRowNum, -1);
+	    }
+	    if (rowIndex == lastRowNum) {
+	        Row removingRow = sheet.getRow(rowIndex);
+	        if (removingRow != null) {
+	            sheet.removeRow(removingRow);
+	        }
+	    }
+	}
+
+}

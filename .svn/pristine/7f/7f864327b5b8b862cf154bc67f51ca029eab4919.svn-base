@@ -1,0 +1,5 @@
+package com.sdrc.covid19odisha.controllers;
+
+public class SubmissionController {
+
+}

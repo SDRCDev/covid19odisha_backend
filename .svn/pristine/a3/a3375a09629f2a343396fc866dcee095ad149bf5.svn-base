@@ -1,0 +1,41 @@
+package com.sdrc.covid19odisha.services;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.sdrc.covid19odisha.collections.Task;
+import com.sdrc.covid19odisha.repositories.TaskRepository;
+
+@Service
+public class TaskServiceImpl implements TaskService {
+
+	@Autowired
+	private TaskRepository taskRepository;
+	@Override
+	public void saveTask(Map<String, Object> data) {
+		// TODO Auto-generated method stub
+		Task task = new Task();
+		task.setData(data);
+		taskRepository.save(task);
+	}
+	@Override
+	public Map<String, List<?>> getTaskList(String mobile) {
+		// TODO Auto-generated method stub
+		Map<String, List<?>> table = new HashMap<String, List<?>>();
+		List<String> header = Arrays.asList("task", "details","contactPerson", "contactPersonMobile");
+		List<Map<String, Object>> tasks = new ArrayList<Map<String,Object>>();
+		taskRepository.getByMobileNumber(mobile).forEach(x-> {
+			tasks.add(x.getData());
+		});;
+		table.put("tableColumn", header);
+		table.put("tableData", tasks);
+		return table;
+	}
+
+}

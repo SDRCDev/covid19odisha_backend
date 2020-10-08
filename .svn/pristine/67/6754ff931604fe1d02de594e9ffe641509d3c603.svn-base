@@ -1,0 +1,19 @@
+package com.sdrc.covid19odisha.collections;
+
+import java.util.Date;
+import java.util.Map;
+
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import lombok.Data;
+
+@Document
+@Data
+public class SubmissionData {
+	public String _id;
+	public Integer formId;
+	public Date createdDate;
+	public String createdBy;
+	public Map<String, Object> data;
+	public Boolean isVerified;
+}

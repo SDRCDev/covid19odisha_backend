@@ -1,0 +1,35 @@
+package com.sdrc.covid19odisha.controllers;
+
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.sdrc.covid19odisha.services.DashboardService;
+import com.sdrc.covid19odisha.utils.DashboardSelection;
+
+@RestController
+public class DashboardController {
+	@Autowired
+	private DashboardService dashboardService;
+	
+	@GetMapping("/bypass/getDashboardSelectionPanel")
+	public List<DashboardSelection> getDashboardSelectionPanel(@RequestParam(value = "areaId", required=false) Integer areaId) {
+		return dashboardService.getDashboardSelectionPanel(areaId);
+	}
+	
+	@GetMapping("/bypass/getDashboardData")
+	public Map<String, Map> getDashboardData(@RequestParam("formId") Integer formId, @RequestParam("optionPath") String optionPath, 
+			@RequestParam(value = "typeDetailId", required = false) Integer typeDetailId) {
+		return dashboardService.getDashboardData(formId, optionPath,typeDetailId);
+	}
+	
+	@GetMapping("/bypass/getBlockData")
+	public Map<String, List<?>> getBlockData(@RequestParam("formId") Integer formId, @RequestParam("optionPath") String optionPath,
+			@RequestParam("districtId") Integer districtId){
+		return dashboardService.getBlockTableData(formId, optionPath, districtId);
+	}
+}
